@@ -1,0 +1,10 @@
+node_modules/
+dist/
+bin/
+obj/
+.env
+.env.*
+!.env.example
+local.settings.json
+TestResults/
+.azure/.preview-temp/
