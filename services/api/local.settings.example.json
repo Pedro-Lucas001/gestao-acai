@@ -3,9 +3,6 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "POSTGRESQL_CONNECTION_STRING": "Host=localhost;Port=5432;Database=gestao_acai;Username=postgres;Password=CHANGE_ME",
-    "ADMIN_USERNAME": "admin",
-    "ADMIN_PASSWORD": "",
-    "ADMIN_API_TOKEN": ""
+    "POSTGRESQL_CONNECTION_STRING": "Host=localhost;Port=5432;Database=gestao_acai;Username=postgres;Password=CHANGE_ME"
   }
 }

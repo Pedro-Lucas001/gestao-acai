@@ -2,9 +2,9 @@
 
 A integração da Fase 1 foi implementada em `FinanceEndpoints`, no cliente HTTP `services/web/src/api/index.ts` e nos formulários `Forms.tsx`. Consulte o README para configuração e regras financeiras.
 
-## Rotas protegidas
+## Rotas da API local, sem login
 
-Login: `POST /api/auth/login` com `{ "username": "...", "password": "..." }`. Envie o `accessToken` como `Authorization: Bearer <token>`.
+Uso pessoal: não há autenticação nem rota de login. O Compose publica a API somente em `127.0.0.1:7071`.
 
 - `GET, POST /api/ingredients`; `PUT, DELETE /api/ingredients/{id}`.
 - `GET, POST /api/products`; `GET, PUT, DELETE /api/products/{id}`.
@@ -30,6 +30,6 @@ Valores financeiros/quantidades não negativos, com até 6 casas; compra, consum
 
 - PostgreSQL fora do Supabase; EF Core + Npgsql; variável `POSTGRESQL_CONNECTION_STRING`.
 - Migrações em `services/api/Data/Migrations`. Sem dados de exemplo e sem migração automática no início.
-- Token de administrador somente no servidor e na memória da sessão da interface. Configurar as variáveis do README.
+- Sem usuário, senha ou token no aplicativo; a senha interna do banco permanece no ambiente do servidor.
 - Backend e frontend são serviços separados; em produção encaminhar `/api` ou configurar API HTTPS/CORS antes do build.
-- Produção ainda depende da configuração do servidor de banco e da hospedagem. A implementação e os testes não equivalem a um deploy.
+- Aplicação destinada ao uso pessoal local. Atualizações do modo anterior preservam a senha e os dados do PostgreSQL, removendo as antigas credenciais do aplicativo.

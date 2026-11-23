@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   ArrowDownLeft,
   ArrowRight,
@@ -13,7 +13,6 @@ import {
   FlaskConical,
   LayoutDashboard,
   LoaderCircle,
-  LogOut,
   Menu,
   Pencil,
   Plus,
@@ -27,7 +26,9 @@ import {
   Waves,
   X,
 } from "lucide-react";
-import { api, signOut } from "./api";
+import { api } from "./api";
+import { Brand } from "./components/Brand";
+import { Intro } from "./components/Intro";
 import type {
   Ingredient,
   Period,
@@ -46,115 +47,9 @@ const navigation = [
   { label: "Despesas", icon: Wallet },
   { label: "Precificação", icon: CircleDollarSign },
 ] as const;
-export function Brand({ large = false }: { large?: boolean }) {
-  return (
-    <div className={`brand ${large ? "brand-large" : ""}`}>
-      <div className="logo-frame">
-        <img src="/netuno-logo.jpg" alt="Netuno Açaí" />
-      </div>
-      {!large && <span>GESTÃO DO NEGÓCIO</span>}
-    </div>
-  );
-}
-function Login({ onLogin }: { onLogin: () => void }) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const values = new FormData(e.currentTarget);
-    setBusy(true);
-    setError("");
-    try {
-      await api.login(
-        String(values.get("username")),
-        String(values.get("password")),
-      );
-      onLogin();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="login-shell">
-      <aside className="login-story">
-        <span className="login-kicker">
-          <Waves size={24} /> NETUNO AÇAÍ
-        </span>
-        <div>
-          <span className="eyebrow">CADA GARRAFA CONTA.</span>
-          <h1>
-            Mais clareza.
-            <br />
-            Mais controle.
-            <br />
-            <em>Seu negócio no rumo.</em>
-          </h1>
-          <p>Transforme custos, preços e vendas em decisões para o seu açaí.</p>
-          <div className="story-tags">
-            <span>
-              <Check size={16} /> Custos reais
-            </span>
-            <span>
-              <Check size={16} /> Margem por produto
-            </span>
-          </div>
-        </div>
-        <span className="login-foot">DO PRIMEIRO INSUMO À ÚLTIMA VENDA.</span>
-      </aside>
-      <main className="login-main">
-        <Brand large />
-        <div className="login-form">
-          <span className="eyebrow">BEM-VINDO DE VOLTA</span>
-          <h2>Acesse seu negócio</h2>
-          <p>Entre com sua conta de administrador.</p>
-          <form onSubmit={submit}>
-            <label>
-              Usuário
-              <input
-                name="username"
-                autoComplete="username"
-                required
-                maxLength={120}
-                placeholder="Seu usuário"
-              />
-            </label>
-            <label>
-              Senha
-              <input
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                placeholder="Sua senha"
-              />
-            </label>
-            {error && (
-              <div className="error" role="alert">
-                {error}
-              </div>
-            )}
-            <button className="primary-button" disabled={busy}>
-              {busy ? (
-                <LoaderCircle className="spin" size={18} />
-              ) : (
-                <>
-                  Entrar no painel <ArrowRight size={18} />
-                </>
-              )}
-            </button>
-          </form>
-          <small>
-            <ShieldCheck size={15} /> Acesso exclusivo à administração
-          </small>
-        </div>
-      </main>
-    </div>
-  );
-}
 export default function App() {
-  const [logged, setLogged] = useState(false);
+  const [intro, setIntro] = useState(true);
+  const finishIntro = useCallback(() => setIntro(false), []);
   const [section, setSection] = useState<Section>("Visão geral");
   const [period, setPeriod] = useState<Period>(monthPeriod);
   const [data, setData] = useState<Snapshot>();
@@ -179,20 +74,19 @@ export default function App() {
     }
   }, [period]);
   useEffect(() => {
-    if (logged) void load();
-  }, [logged, load]);
-  useEffect(() => {
-    const logout = () => {
+    void load();
+    return () => {
       ++version.current;
-      setLogged(false);
-      setData(undefined);
-      setEditor(undefined);
-      setError("");
-      setToast("");
     };
-    window.addEventListener("acai:logout", logout);
-    return () => window.removeEventListener("acai:logout", logout);
-  }, []);
+  }, [load]);
+  useEffect(() => {
+    if (!intro) {
+      const frame = requestAnimationFrame(() =>
+        document.getElementById("page-title")?.focus({ preventScroll: true }),
+      );
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [intro]);
   useEffect(() => {
     if (toast) {
       const timer = window.setTimeout(() => setToast(""), 4500);
@@ -209,7 +103,7 @@ export default function App() {
     setSection(next);
     setMobile(false);
   };
-  if (!logged) return <Login onLogin={() => setLogged(true)} />;
+  if (intro) return <Intro onComplete={finishIntro} />;
   const create = (target: Section = section) =>
     setEditor({
       section:
@@ -233,7 +127,7 @@ export default function App() {
           <X size={22} />
         </button>
         <Brand />
-        <span className="nav-label">ADMINISTRAÇÃO</span>
+        <span className="nav-label">MEU NEGÓCIO</span>
         <nav aria-label="Menu principal">
           {navigation.map(({ label, icon: Icon }) => (
             <button
@@ -259,14 +153,11 @@ export default function App() {
               Ver precificação <ArrowRight size={15} />
             </button>
           </div>
-          <button className="nav-item" onClick={() => signOut()}>
-            <LogOut size={18} /> Sair da conta
-          </button>
           <div className="profile">
-            <span>A</span>
+            <span>N</span>
             <div>
-              <strong>Administrador</strong>
-              <small>Netuno Açaí</small>
+              <strong>Meu espaço</strong>
+              <small>Organização pessoal</small>
             </div>
             <ShieldCheck size={17} />
           </div>

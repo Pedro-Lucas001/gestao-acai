@@ -58,9 +58,9 @@ jobs:
         with:
           node-version: 22
       - run: npm run test:setup
-      - run: npm run setup -- --quiet
+      - run: npm run setup
       - run: npm run verify:local
-      - name: Stop local services (keep credentials out of logs)
+      - name: Stop local services
         if: always()
         run: |
           if [ -f .local/settings.json ]; then npm run stop; fi

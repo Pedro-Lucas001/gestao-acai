@@ -2,7 +2,6 @@ using System.Data;
 using System.Net;
 using System.Text.Json;
 using System.Web;
-using GestaoAcai.Api.Configuration;
 using GestaoAcai.Api.Data;
 using GestaoAcai.Api.Domain;
 using Microsoft.Azure.Functions.Worker;
@@ -25,7 +24,6 @@ public sealed class FinanceEndpoints(GestaoDbContext db, ILogger<FinanceEndpoint
 
     private async Task<HttpResponseData> Run(HttpRequestData request, Func<Task<object>> work)
     {
-        if (!AdminAuth.IsAuthorized(request)) return await AdminAuth.Unauthorized(request);
         object payload; var status = HttpStatusCode.OK;
         try { payload = await work(); }
         catch (DomainError error) { status = (HttpStatusCode)error.Status; payload = new { error = error.Message }; }

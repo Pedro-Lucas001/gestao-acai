@@ -7,11 +7,6 @@ import type {
   Sale,
   Snapshot,
 } from "./types";
-let token = "";
-export const signOut = () => {
-  token = "";
-  window.dispatchEvent(new Event("acai:logout"));
-};
 const base = (
   (import.meta as unknown as { env: Record<string, string> }).env
     .VITE_API_BASE_URL || "/api"
@@ -29,12 +24,10 @@ export async function request<T>(
       signal: abort.signal,
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const data = await response.json().catch(() => null);
-    if (response.status === 401 && !path.startsWith("auth/")) signOut();
     if (!response.ok)
       throw new Error(
         data?.error ||
@@ -60,14 +53,6 @@ export async function request<T>(
   }
 }
 export const api = {
-  async login(username: string, password: string) {
-    const result = await request<{ accessToken: string }>(
-      "auth/login",
-      "POST",
-      { username, password },
-    );
-    token = result.accessToken;
-  },
   async load(period: Period): Promise<Snapshot> {
     const query = `?${new URLSearchParams({ from: period.from, to: period.to })}`;
     const [summary, ingredients, products, sales, expenses] = await Promise.all(
