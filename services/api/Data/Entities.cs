@@ -8,16 +8,16 @@ public sealed class Ingredient
     public decimal PurchaseQuantity { get; set; }
     public decimal PurchasePrice { get; set; }
 }
-
 public sealed class Product
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public string Size { get; set; } = "";
     public decimal SalePrice { get; set; }
+    public decimal FeePercent { get; set; }
+    public decimal FeePerUnit { get; set; }
     public List<RecipeItem> Recipe { get; set; } = [];
 }
-
 public sealed class RecipeItem
 {
     public Guid Id { get; set; }
@@ -25,7 +25,6 @@ public sealed class RecipeItem
     public Guid IngredientId { get; set; }
     public decimal Quantity { get; set; }
 }
-
 public sealed class Sale
 {
     public Guid Id { get; set; }
@@ -34,18 +33,17 @@ public sealed class Sale
     public string PaymentMethod { get; set; } = "";
     public List<SaleItem> Items { get; set; } = [];
 }
-
 public sealed class SaleItem
 {
     public Guid Id { get; set; }
     public Guid SaleId { get; set; }
     public Guid ProductId { get; set; }
+    public string ProductNameSnapshot { get; set; } = "";
     public decimal Quantity { get; set; }
     public decimal SalePriceSnapshot { get; set; }
     public decimal UnitCostSnapshot { get; set; }
     public decimal VariableFeeSnapshot { get; set; }
 }
-
 public sealed class Expense
 {
     public Guid Id { get; set; }
@@ -54,4 +52,9 @@ public sealed class Expense
     public DateOnly OccurredOn { get; set; }
     public decimal Amount { get; set; }
     public bool IsFixed { get; set; }
+}
+public sealed class FixedCostSettings
+{
+    public int Id { get; set; } = 1;
+    public decimal MonthlyAmount { get; set; }
 }

@@ -21,7 +21,8 @@ public sealed class BreakEvenFunction
         {
             var invalid = request.CreateResponse(System.Net.HttpStatusCode.BadRequest);
             await invalid.WriteAsJsonAsync(new { error = "Informe custos fixos mensais válidos." });
-            return invalid;
+            invalid.StatusCode = System.Net.HttpStatusCode.BadRequest;
+        return invalid;
         }
 
         var response = request.CreateResponse(System.Net.HttpStatusCode.OK);

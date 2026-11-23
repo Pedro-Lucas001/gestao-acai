@@ -8,3 +8,6 @@ obj/
 local.settings.json
 TestResults/
 .azure/.preview-temp/
+test-results/
+playwright-report/
+*.tsbuildinfo
