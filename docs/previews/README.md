@@ -1,6 +1,6 @@
 # Prévias do visual Netuno Açaí
 
-- `login-desktop.png`: tela real de entrada, com a logo original fornecida pelo proprietário.
-- `dashboard-desktop.png`: interface capturada pelos testes de navegador com valores de teste. Os valores não são vendas reais e não são incluídos na aplicação nem no banco.
+- `abertura-desktop.png`: quadro da abertura animada com a logo original. A animação dura aproximadamente dois segundos e abre o painel automaticamente; o botão Entrar agora permite pular.
+- `dashboard-desktop.png`: painel com a nova identificação de uso pessoal, sem campos de login ou saída de conta. A captura usa respostas vazias de teste, sem inserir dados no aplicativo ou no banco.
 
-As imagens documentam o layout desta alteração; a interface é responsiva e o fluxo também foi testado com viewport de celular.
+As imagens documentam o layout. Abertura automática, entrada pelo teclado, preferência por movimento reduzido e fluxos de cadastro foram validados em desktop e celular.

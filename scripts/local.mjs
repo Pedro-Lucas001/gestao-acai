@@ -19,18 +19,15 @@ const apiBase = "http://127.0.0.1:7071/api";
 
 export function validateSettings(settings) {
   if (
-    settings?.username !== "admin" ||
-    !["password", "apiToken", "databasePassword"].every(
-      (key) =>
-        typeof settings[key] === "string" &&
-        /^[A-Za-z0-9_-]{20,128}$/.test(settings[key]),
-    )
+    typeof settings?.databasePassword !== "string" ||
+    !/^[A-Za-z0-9_-]{20,128}$/.test(settings.databasePassword)
   ) {
     throw new Error(
-      "A configuração .local/settings.json está inválida. Corrija o arquivo; nenhuma credencial existente foi sobrescrita.",
+      "A configuração .local/settings.json está inválida. Corrija o arquivo; a senha do banco não foi alterada.",
     );
   }
-  return settings;
+  // Retain the existing PostgreSQL password when upgrading from the login-based setup.
+  return { databasePassword: settings.databasePassword };
 }
 function parseSettings(text) {
   let parsed;
@@ -49,7 +46,7 @@ export async function readSettings(directory = root) {
   } catch (error) {
     if (error.code === "ENOENT")
       throw new Error(
-        "Execute npm run setup primeiro para criar o acesso local.",
+        "Execute npm run setup primeiro para preparar o banco local.",
       );
     throw error;
   }
@@ -74,9 +71,6 @@ export async function configure(directory = root) {
       if (envError.code !== "ENOENT") throw envError;
     }
     settings = {
-      username: "admin",
-      password: randomBytes(18).toString("base64url"),
-      apiToken: randomBytes(48).toString("base64url"),
       databasePassword: randomBytes(32).toString("base64url"),
     };
     await writeFile(
@@ -85,7 +79,13 @@ export async function configure(directory = root) {
       { flag: "wx", mode: 0o600 },
     );
   }
-  const environment = `ADMIN_PASSWORD=${settings.password}\nADMIN_API_TOKEN=${settings.apiToken}\nPOSTGRES_PASSWORD=${settings.databasePassword}\n`;
+  // Remove obsolete application credentials without changing the database password.
+  await writeFile(
+    resolve(directory, jsonFile),
+    JSON.stringify(settings, null, 2) + "\n",
+    { mode: 0o600 },
+  );
+  const environment = `POSTGRES_PASSWORD=${settings.databasePassword}\n`;
   await writeFile(resolve(directory, envFile), environment, { mode: 0o600 });
   // Windows controls access through the user's directory ACL; POSIX gets explicit modes.
   if (process.platform !== "win32") {
@@ -159,37 +159,9 @@ export async function waitForApi({ timeout = 90000, fetcher = fetch } = {}) {
     "A API não iniciou em http://localhost:7071. Consulte npm run logs:api. Confira se a porta 7071 já está em uso.",
   );
 }
-export async function verify(settings, fetcher = fetch) {
-  const call = (path, options = {}) =>
-    fetcher(apiBase + path, { ...options, signal: AbortSignal.timeout(15000) });
-  const denied = await call("/ingredients");
-  if (denied.status !== 401)
-    throw new Error("A API não bloqueou a consulta sem autenticação.");
-  const wrong = await call("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: settings.username,
-      password: randomBytes(24).toString("base64url"),
-    }),
-  });
-  if (wrong.status !== 401)
-    throw new Error("A API não recusou uma senha incorreta.");
-  const login = await call("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: settings.username,
-      password: settings.password,
-    }),
-  });
-  if (!login.ok)
-    throw new Error(
-      "O login local não foi aceito. Confira as configurações do contêiner com npm run logs:api.",
-    );
-  const { accessToken } = await login.json();
-  if (typeof accessToken !== "string" || !accessToken)
-    throw new Error("A API não retornou um token válido.");
+export async function verify(fetcher = fetch) {
+  const call = (path) =>
+    fetcher(apiBase + path, { signal: AbortSignal.timeout(15000) });
   for (const path of [
     "/ingredients",
     "/products",
@@ -198,9 +170,7 @@ export async function verify(settings, fetcher = fetch) {
     "/fixed-costs",
     "/dashboard",
   ]) {
-    const response = await call(path, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const response = await call(path);
     if (!response.ok)
       throw new Error(
         `A consulta ${path} falhou (${response.status}). Consulte npm run logs:api.`,
@@ -213,22 +183,10 @@ export async function verify(settings, fetcher = fetch) {
       throw new Error(`A resposta de ${path} é inválida.`);
   }
 }
-function showLogin(settings) {
-  console.log(
-    `\nAcesso local Netuno Açaí\nUsuário: ${settings.username}\nSenha: ${settings.password}\n`,
-  );
-  console.log(
-    "A senha fica somente em .local/settings.json no seu computador. Nunca envie esse arquivo ao GitHub.",
-  );
-}
-export async function main(command, { quiet = false } = {}) {
-  if (command === "login") {
-    showLogin(await readSettings());
-    return;
-  }
+export async function main(command) {
   if (command === "setup") {
     await checkDocker();
-    const settings = await configure();
+    await configure();
     console.log(
       "Preparando PostgreSQL, emulador de armazenamento e API locais…",
     );
@@ -254,16 +212,15 @@ export async function main(command, { quiet = false } = {}) {
     ]);
     await docker(["up", "-d", "api"]);
     await waitForApi();
-    await verify(settings);
+    await verify();
     await run("npm", ["ci"], { cwd: resolve(root, "services/web") });
     console.log(
-      "\nPronto: login e consultas ao PostgreSQL validados. Execute npm run dev e abra http://localhost:5173.",
+      "\nPronto: acesso direto ao painel e consultas ao PostgreSQL validados. Execute npm run dev e abra http://localhost:5173.",
     );
-    if (!quiet) showLogin(settings);
     return;
   }
   if (command === "dev") {
-    const settings = await readSettings();
+    await readSettings();
     await checkDocker();
     await docker([
       "up",
@@ -276,9 +233,9 @@ export async function main(command, { quiet = false } = {}) {
       "api",
     ]);
     await waitForApi();
-    await verify(settings);
+    await verify();
     console.log(
-      "Abra http://localhost:5173. Para consultar a senha: npm run login:local.",
+      "Abra http://localhost:5173. A abertura entra no painel automaticamente.",
     );
     await run(
       "npm",
@@ -297,9 +254,10 @@ export async function main(command, { quiet = false } = {}) {
     return;
   }
   if (command === "verify") {
-    await verify(await readSettings());
+    await readSettings();
+    await verify();
     console.log(
-      "Acesso local e consultas protegidas validados. Nenhum registro foi criado.",
+      "Acesso direto e consultas ao banco validados. Nenhum registro foi criado.",
     );
     return;
   }
@@ -311,17 +269,15 @@ export async function main(command, { quiet = false } = {}) {
     return;
   }
   throw new Error(
-    "Use npm run setup, npm run dev, npm run login:local, npm run verify:local, npm run stop ou npm run logs:api.",
+    "Use npm run setup, npm run dev, npm run verify:local, npm run stop ou npm run logs:api.",
   );
 }
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  main(process.argv[2], { quiet: process.argv.includes("--quiet") }).catch(
-    (error) => {
-      console.error("\n" + error.message);
-      process.exitCode = 1;
-    },
-  );
+  main(process.argv[2]).catch((error) => {
+    console.error("\n" + error.message);
+    process.exitCode = 1;
+  });
 }

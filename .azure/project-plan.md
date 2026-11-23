@@ -2,11 +2,11 @@
 
 ## Objetivo
 
-Construir uma aplicação web responsiva, em português do Brasil e com valores em BRL, para um negócio de açaí engarrafado operado por um usuário administrador. O sistema deve mostrar o lucro real por produto e apoiar a operação, começando por um MVP financeiro e evoluindo para estoque e escala.
+Construir uma aplicação web responsiva, em português do Brasil e com valores em BRL, para um negócio de açaí engarrafado para uso pessoal. O sistema deve mostrar o lucro real por produto e apoiar a operação, começando por um MVP financeiro e evoluindo para estoque e escala.
 
 ## Usuário e escopo
 
-- Um negócio e um usuário administrador autenticado.
+- Um negócio e um usuário local, com acesso direto sem login.
 - Interface utilizável em desktop e celular.
 - Implementação inicial limitada à Fase 1; as Fases 2 e 3 ficam documentadas como evolução, sem antecipar funcionalidades ao MVP.
 
@@ -15,7 +15,7 @@ Construir uma aplicação web responsiva, em português do Brasil e com valores 
 - **Frontend:** React e TypeScript, aplicação web responsiva.
 - **Backend:** API em C# com Azure Functions; cálculos e regras financeiras centralizados no servidor.
 - **Persistência:** PostgreSQL para dados transacionais. Blob Storage fica reservado a anexos/exportações quando necessário, sem ser dependência de funcionalidades do MVP.
-- **Autenticação:** acesso protegido para o administrador.
+- **Entrada:** animação com a logo e acesso direto ao painel, sem autenticação, em ambiente local.
 - **Formato regional:** pt-BR, moeda BRL e datas no padrão brasileiro.
 
 ## Fase 1 — MVP: descobrir o lucro real

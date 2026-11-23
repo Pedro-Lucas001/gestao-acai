@@ -18,11 +18,11 @@ namespace GestaoAcai.Api.Tests;
 public sealed class EndpointTests
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static HttpRequestData Request(string method, string path, object? body = null, bool auth = true)
+    private static HttpRequestData Request(string method, string path, object? body = null)
     {
         var services = new ServiceCollection().Configure<WorkerOptions>(o => o.Serializer = new JsonObjectSerializer(Json)).BuildServiceProvider();
         var context = new Mock<FunctionContext>(); context.SetupProperty(x => x.InstanceServices, services);
-        var headers = new HttpHeadersCollection(); if (auth) headers.Add("Authorization", "Bearer integration-token");
+        var headers = new HttpHeadersCollection();
         var response = new Mock<HttpResponseData>(context.Object);
         response.SetupProperty(x => x.StatusCode, HttpStatusCode.OK);
         response.SetupProperty(x => x.Body, new MemoryStream());
@@ -42,22 +42,18 @@ public sealed class EndpointTests
         return JsonSerializer.Deserialize<JsonElement>(text);
     }
     [Fact]
-    public async Task ProtectedEndpointsDenyAccessBeforeDatabaseUse()
+    public async Task CalculationsAreAvailableWithoutLogin()
     {
-        Environment.SetEnvironmentVariable("ADMIN_API_TOKEN", "integration-token");
-        await using var db = new GestaoDbContext(new DbContextOptionsBuilder<GestaoDbContext>().UseNpgsql("Host=127.0.0.1;Database=unused").Options);
-        var api = new FinanceEndpoints(db, NullLogger<FinanceEndpoints>.Instance);
-        await Read(await api.Ingredients(Request("GET", "ingredients", auth: false)), HttpStatusCode.Unauthorized);
-        var login = new AuthFunction();
-        Environment.SetEnvironmentVariable("ADMIN_USERNAME", "test-admin"); Environment.SetEnvironmentVariable("ADMIN_PASSWORD", "test-password");
-        await Read(await login.Run(Request("POST", "auth/login", new { username = (string?)null, password = "test-password" })), HttpStatusCode.Unauthorized);
+        var response = await new BreakEvenFunction().Run(Request("POST", "calculations/break-even", new { monthlyFixedCosts = 100, averageContribution = 10 }));
+        var result = await Read(response);
+        Assert.True(result.GetProperty("viable").GetBoolean());
+        Assert.Equal(10m, result.GetProperty("units").GetDecimal());
     }
     [Fact]
     public async Task PostgreSqlPersistsFlowAndPreservesSaleSnapshots()
     {
         var connection = Environment.GetEnvironmentVariable("TEST_POSTGRESQL_CONNECTION_STRING");
         Assert.False(string.IsNullOrWhiteSpace(connection), "Set TEST_POSTGRESQL_CONNECTION_STRING to run the PostgreSQL integration test.");
-        Environment.SetEnvironmentVariable("ADMIN_API_TOKEN", "integration-token");
         var temporary = new NpgsqlConnectionStringBuilder(connection) { Database = "acai_test_" + Guid.NewGuid().ToString("N") };
         var options = new DbContextOptionsBuilder<GestaoDbContext>().UseNpgsql(temporary.ConnectionString).Options;
         await using var database = new GestaoDbContext(options);

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using GestaoAcai.Api.Configuration;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -12,7 +11,6 @@ public sealed class BreakEvenFunction
     [Function("BreakEven")]
     public async Task<HttpResponseData> Run([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "calculations/break-even")] HttpRequestData request)
     {
-        if (!AdminAuth.IsAuthorized(request)) return await AdminAuth.Unauthorized(request);
         BreakEvenRequest? input;
         try { input = await JsonSerializer.DeserializeAsync<BreakEvenRequest>(request.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
         catch (JsonException) { input = null; }

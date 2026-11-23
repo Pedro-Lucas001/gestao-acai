@@ -33,7 +33,7 @@ const summary = {
   breakEvenUnits: 26,
   daily: [{ date: "2026-11-23", revenue: 20 }],
 };
-test("login, identity, responsive navigation, saving and API error recovery", async ({
+test("animated entry, direct access, responsive navigation, saving and API error recovery", async ({
   page,
 }, info) => {
   let rejectSave = false;
@@ -44,9 +44,8 @@ test("login, identity, responsive navigation, saving and API error recovery", as
     if (!new URL(req.url()).pathname.startsWith("/api/"))
       return route.continue();
     const path = new URL(req.url()).pathname.split("/").pop()!;
-    if (path === "login")
-      return route.fulfill({ json: { accessToken: "test-token" } });
-    expect(req.headers().authorization).toBe("Bearer test-token");
+    expect(path).not.toBe("login");
+    expect(req.headers().authorization).toBeUndefined();
     if (req.method() !== "GET") {
       if (rejectSave)
         return route.fulfill({
@@ -76,9 +75,6 @@ test("login, identity, responsive navigation, saving and API error recovery", as
   await expect(
     page.getByRole("img", { name: "Netuno Açaí", exact: true }),
   ).toBeVisible();
-  await page.getByLabel("Usuário", { exact: true }).fill("admin");
-  await page.getByLabel("Senha", { exact: true }).fill("secret");
-  await page.getByRole("button", { name: "Entrar no painel" }).click();
   await expect(
     page.getByRole("heading", { name: "Seu negócio, em perspectiva." }),
   ).toBeVisible();
@@ -182,10 +178,54 @@ test("login, identity, responsive navigation, saving and API error recovery", as
   rejectLoad = false;
   await page.getByRole("button", { name: "Tentar novamente" }).click();
   await expect(page.getByText("Rentabilidade por produto")).toBeVisible();
-  if (info.project.name === "mobile")
-    await page.getByRole("button", { name: "Abrir menu" }).click();
-  await page.getByRole("button", { name: "Sair da conta" }).click();
+  await expect(page.getByRole("button", { name: "Sair da conta" })).toHaveCount(
+    0,
+  );
+  await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Acesse seu negócio" }),
+    page.getByRole("heading", { name: "Seu negócio, em perspectiva." }),
   ).toBeVisible();
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveCount(0);
+});
+
+async function unavailableApi(page: import("@playwright/test").Page) {
+  await page.route("**/api/**", (route) =>
+    new URL(route.request().url()).pathname.startsWith("/api/")
+      ? route.fulfill({ status: 503, json: { error: "Banco indisponível." } })
+      : route.continue(),
+  );
+}
+
+test("intro can be skipped with the keyboard and never blocks an API error", async ({
+  page,
+}) => {
+  await unavailableApi(page);
+  await page.goto("/");
+  await expect(
+    page.getByRole("main", { name: "Abertura Netuno Açaí" }),
+  ).toBeVisible();
+  const skip = page.getByRole("button", { name: "Entrar agora" });
+  await skip.focus();
+  await skip.press("Enter");
+  await expect(
+    page.getByRole("main", { name: "Abertura Netuno Açaí" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Seu negócio, em perspectiva." }),
+  ).toBeFocused();
+  await expect(page.getByRole("alert")).toContainText("Banco indisponível");
+  await expect(page.getByLabel("Usuário", { exact: true })).toHaveCount(0);
+});
+
+test("reduced motion opens the dashboard directly", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await unavailableApi(page);
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Seu negócio, em perspectiva." }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Entrar agora" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveCount(0);
 });
