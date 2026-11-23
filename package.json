@@ -1,0 +1,17 @@
+{
+  "name": "netuno-acai",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/local.mjs setup",
+    "dev": "node scripts/local.mjs dev",
+    "login:local": "node scripts/local.mjs login",
+    "stop": "node scripts/local.mjs stop",
+    "logs:api": "node scripts/local.mjs logs",
+    "verify:local": "node scripts/local.mjs verify",
+    "test:setup": "node --test scripts/local.test.mjs"
+  }
+}

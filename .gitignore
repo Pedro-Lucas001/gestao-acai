@@ -11,3 +11,4 @@ TestResults/
 test-results/
 playwright-report/
 *.tsbuildinfo
+.local/
