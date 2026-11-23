@@ -1,0 +1,65 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Netuno: preparar banco e login",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "setup"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "windows": {
+        "command": "npm.cmd"
+      }
+    },
+    {
+      "label": "Netuno: iniciar sistema",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "windows": {
+        "command": "npm.cmd"
+      }
+    },
+    {
+      "label": "Netuno: mostrar login local",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "login:local"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "windows": {
+        "command": "npm.cmd"
+      }
+    },
+    {
+      "label": "Netuno: parar serviços locais",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "stop"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "windows": {
+        "command": "npm.cmd"
+      }
+    }
+  ]
+}

@@ -49,3 +49,18 @@ jobs:
         with:
           name: browser-tests
           path: services/web/test-results
+  local-setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:setup
+      - run: npm run setup -- --quiet
+      - run: npm run verify:local
+      - name: Stop local services (keep credentials out of logs)
+        if: always()
+        run: |
+          if [ -f .local/settings.json ]; then npm run stop; fi

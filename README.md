@@ -15,6 +15,35 @@ MVP financeiro para um negócio e um administrador, com identidade visual da Net
 
 A interface usa a API real. Banco indisponível aparece como erro; não há dados fictícios nem preenchimento automático de vendas. Estoque, produção, validade, contas a receber e emissão fiscal continuam fora deste MVP.
 
+## Começar pelo VS Code (Windows)
+
+Abra **a pasta raiz `gestao-acai`** no VS Code. Instale [Node.js 22 ou superior](https://nodejs.org/pt/download) e [Docker Desktop](https://www.docker.com/products/docker-desktop/), mantenha o Docker aberto em modo de contêineres Linux e abra um novo terminal.
+
+```sh
+npm run setup
+npm run dev
+```
+
+O primeiro comando cria o usuário **admin** com senha e token aleatórios exclusivos do seu computador, prepara PostgreSQL 16 e Azurite, compila a API, aplica as migrações e verifica o login e as consultas protegidas. Depois instala as dependências da interface. A primeira execução demora mais porque baixa as imagens e compila o backend. Não precisa instalar .NET nem Azure Functions Core Tools no computador para este modo.
+
+O segundo comando inicia a interface em **http://localhost:5173**. A senha é mostrada ao concluir o setup; para consultá-la novamente, em outro terminal:
+
+```sh
+npm run login:local
+```
+
+No PowerShell, se `npm.ps1` for bloqueado pela política de execução, use `npm.cmd run setup`, `npm.cmd run dev` e `npm.cmd run login:local`. Não é necessário mudar a política do Windows.
+
+Também é possível usar **Terminal → Executar Tarefa** e escolher `Netuno: preparar banco e login`, `Netuno: iniciar sistema` ou `Netuno: mostrar login local`.
+
+- A senha fica em `.local/settings.json` e o Compose recebe `.local/compose.env`. Ambos são ignorados pelo Git e excluídos da imagem Docker. Não compartilhe esses arquivos nem a saída do comando de login.
+- Executar o setup novamente **preserva** as credenciais existentes e o banco. Guarde a pasta `.local` junto do ambiente local; uma instalação nova gera credenciais diferentes. O script recusa configurações incompletas em vez de trocar a senha do banco silenciosamente.
+- O PostgreSQL é um contêiner local, fora do Supabase, com volume persistente. Ele atende em `127.0.0.1:55432`, a API em `127.0.0.1:7071` e a interface em `127.0.0.1:5173`. Dados e credenciais não são publicados.
+- `npm run stop` para os contêineres sem apagar os dados. `Ctrl+C` encerra a interface; use `npm run stop` depois para encerrar o restante.
+- `npm run verify:local` valida autenticação e consultas sem inserir registros. `npm run logs:api` mostra os logs recentes do backend para diagnóstico.
+- Este modo usa um banco dedicado do Compose; não utiliza nem substitui `services/api/local.settings.json` de uma configuração manual existente. Para usar PostgreSQL instalado diretamente ou depurar a API C#, siga a seção de execução manual abaixo.
+- Se uma porta estiver ocupada, feche a outra instância antes de iniciar. Para atualizar o backend depois de alterar C#, execute `npm run setup` novamente; a interface atualiza pelo Vite.
+
 ## Arquitetura
 
 - `services/web`: React 18, TypeScript, Vite, Lucide.
@@ -37,7 +66,7 @@ dotnet ef database update --project services/api
 
 O script contém apenas estrutura, sem seed. A migração inicial pressupõe que as tabelas do sistema ainda não existem. Não a aplique sobre tabelas legadas sem revisar a compatibilidade. A conta de migração precisa criar tabelas; o usuário de execução pode ter somente leitura/escrita nas tabelas da aplicação. O backend nunca aplica migrações no início normal. Para aplicar as migrações a partir de uma distribuição compilada, existe o comando explícito `dotnet GestaoAcai.Api.dll --migrate`.
 
-## Executar localmente
+## Executar localmente sem Docker (configuração manual)
 
 Requisitos: Node.js 22, SDK .NET 8, Azure Functions Core Tools v4 e PostgreSQL acessível. Configure armazenamento do Functions com Azurite local ou uma conta Azure apropriada.
 
@@ -84,4 +113,6 @@ dotnet test services/api.Tests/GestaoAcai.Api.Tests.csproj
 
 A integração cria um banco temporário `acai_test_<uuid>`, aplica migrações, testa cadastro → produto → venda → despesa → dashboard e remove somente esse banco temporário. A conta de teste precisa de `CREATE DATABASE`; o banco indicado na conexão não é apagado. Os testes também conferem validações, autenticação, proteção de vínculos, filtros e preservação do histórico.
 
-`.github/workflows/validate.yml` executa builds e testes, com PostgreSQL 16 temporário. Deploy e conexão com um banco real são configurações posteriores: nenhum ambiente de produção foi alterado por este código.
+`npm run test:setup` verifica geração/preservação de credenciais, permissões dos arquivos e falhas de autenticação.
+
+`.github/workflows/validate.yml` executa builds e testes, com PostgreSQL 16 temporário, e sobe o ambiente Docker completo para conferir o acesso real sem expor as credenciais nos logs. Deploy e conexão com um banco real são configurações posteriores: nenhum ambiente de produção foi alterado por este código.
