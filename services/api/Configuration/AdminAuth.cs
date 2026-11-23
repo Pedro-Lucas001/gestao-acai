@@ -23,6 +23,7 @@ public static class AdminAuth
     {
         var response = request.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
         await response.WriteAsJsonAsync(new { error = "Autenticação necessária." });
+        response.StatusCode = System.Net.HttpStatusCode.Unauthorized;
         return response;
     }
 }

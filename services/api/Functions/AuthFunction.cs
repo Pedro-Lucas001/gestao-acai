@@ -25,16 +25,19 @@ public sealed class AuthFunction
         {
             var denied = request.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
             await denied.WriteAsJsonAsync(new { error = "Usuário ou senha inválidos." });
-            return denied;
+            denied.StatusCode = System.Net.HttpStatusCode.Unauthorized;
+        return denied;
         }
 
         var response = request.CreateResponse(System.Net.HttpStatusCode.OK);
+        response.Headers.Add("Cache-Control", "no-store");
         await response.WriteAsJsonAsync(new { accessToken = token, tokenType = "Bearer" });
         return response;
     }
 
-    private static bool FixedEquals(string left, string right)
+    private static bool FixedEquals(string? left, string right)
     {
+        if (left is null) return false;
         var leftBytes = Encoding.UTF8.GetBytes(left);
         var rightBytes = Encoding.UTF8.GetBytes(right);
         return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);

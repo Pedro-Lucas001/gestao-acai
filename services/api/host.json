@@ -1,0 +1,4 @@
+{
+  "version": "2.0",
+  "logging": { "logLevel": { "Default": "Warning", "Host.Results": "Information" } }
+}
