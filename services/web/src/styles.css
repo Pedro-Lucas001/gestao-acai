@@ -1755,3 +1755,6 @@ tr:hover td {
     animation: none !important;
   }
 }
+
+/* The heading receives reading focus after the intro; controls keep their focus rings. */
+#page-title:focus { outline: none; }
