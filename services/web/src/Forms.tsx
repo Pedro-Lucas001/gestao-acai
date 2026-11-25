@@ -1,14 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Plus, Trash2, X, LoaderCircle } from "lucide-react";
 import { api, request } from "./api";
-import type { Ingredient, Product, Section, Snapshot } from "./api/types";
-import { brl, today } from "./format";
+import type {
+  Expense,
+  Ingredient,
+  Product,
+  Section,
+  Snapshot,
+} from "./api/types";
+import { brl, brlUnit, pct, today } from "./format";
+
 export type Editor = {
   section: Section;
-  item?: Ingredient | Product;
+  item?: Ingredient | Product | Expense;
   fixed?: boolean;
+  suggestedPrice?: number;
 };
+
+type RecipeRow = { key: number; ingredientId: string; quantity: number };
 
 export function EditorModal({
   editor,
@@ -21,18 +31,98 @@ export function EditorModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { section, item, fixed } = editor;
-  const product = item as Product | undefined;
-  const [recipe, setRecipe] = useState(
-    product?.recipe ?? [{ ingredientId: "", quantity: 1 }],
+  const { section, item, fixed, suggestedPrice } = editor;
+  const ingredient = section === "Insumos" ? (item as Ingredient | undefined) : undefined;
+  const product = section === "Produtos" ? (item as Product | undefined) : undefined;
+  const expense = section === "Despesas" ? (item as Expense | undefined) : undefined;
+
+  const nextRowKey = useRef(1);
+  const [recipe, setRecipe] = useState<RecipeRow[]>(() =>
+    (product?.recipe ?? [{ ingredientId: "", quantity: 1 }]).map((row) => ({
+      key: nextRowKey.current++,
+      ingredientId: row.ingredientId,
+      quantity: row.quantity,
+    })),
   );
+
+  // Live preview states for Insumos
+  const [ingUnit, setIngUnit] = useState(ingredient?.unit ?? "g");
+  const [ingQty, setIngQty] = useState<number>(ingredient?.purchaseQuantity ?? 0);
+  const [ingPrice, setIngPrice] = useState<number>(ingredient?.purchasePrice ?? 0);
+
+  // Live preview states for Produtos
+  const [prodPrice, setProdPrice] = useState<number>(
+    suggestedPrice ?? product?.price ?? 0,
+  );
+  const [prodFeePercent, setProdFeePercent] = useState<number>(
+    product?.feePercent ?? 0,
+  );
+  const [prodFeePerUnit, setProdFeePerUnit] = useState<number>(
+    product?.feePerUnit ?? 0,
+  );
+
+  // Live preview states for Vendas
   const [saleProduct, setSaleProduct] = useState(data.products[0]?.id ?? "");
   const selected = data.products.find((x) => x.id === saleProduct);
+  const [saleQty, setSaleQty] = useState<number>(1);
+  const [salePrice, setSalePrice] = useState<number>(selected?.price ?? 0);
+  const [saleFeePercent, setSaleFeePercent] = useState<number>(
+    selected?.feePercent ?? 0,
+  );
+  const [saleFeePerUnit, setSaleFeePerUnit] = useState<number>(
+    selected?.feePerUnit ?? 0,
+  );
+
+  useEffect(() => {
+    if (selected) {
+      setSalePrice(selected.price);
+      setSaleFeePercent(selected.feePercent);
+      setSaleFeePerUnit(selected.feePerUnit);
+    }
+  }, [selected?.id]);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const ref = useRef<HTMLElement>(null);
   const busyRef = useRef(busy);
   busyRef.current = busy;
+
+  const ingredientsById = useMemo(
+    () => new Map(data.ingredients.map((x) => [x.id, x])),
+    [data.ingredients],
+  );
+
+  const productPreview = useMemo(() => {
+    const unitCost = recipe.reduce((sum, row) => {
+      const ing = ingredientsById.get(row.ingredientId);
+      if (!ing || ing.purchaseQuantity <= 0 || !Number.isFinite(row.quantity)) {
+        return sum;
+      }
+      return sum + (row.quantity * ing.purchasePrice) / ing.purchaseQuantity;
+    }, 0);
+    const price = Number.isFinite(prodPrice) ? prodPrice : 0;
+    const fee =
+      (price * (Number.isFinite(prodFeePercent) ? prodFeePercent : 0)) / 100 +
+      (Number.isFinite(prodFeePerUnit) ? prodFeePerUnit : 0);
+    const contribution = price - unitCost - fee;
+    const margin = price > 0 ? (contribution / price) * 100 : 0;
+    return { unitCost, fee, contribution, margin };
+  }, [recipe, ingredientsById, prodPrice, prodFeePercent, prodFeePerUnit]);
+
+  const salePreview = useMemo(() => {
+    const qty = Number.isFinite(saleQty) && saleQty > 0 ? saleQty : 0;
+    const price = Number.isFinite(salePrice) && salePrice > 0 ? salePrice : 0;
+    const unitCost = selected?.unitCost ?? 0;
+    const unitFee =
+      (price * (Number.isFinite(saleFeePercent) ? saleFeePercent : 0)) / 100 +
+      (Number.isFinite(saleFeePerUnit) ? saleFeePerUnit : 0);
+    const total = qty * price;
+    const totalCost = qty * unitCost;
+    const totalFees = qty * unitFee;
+    const contribution = total - totalCost - totalFees;
+    return { total, totalCost, totalFees, contribution };
+  }, [saleQty, salePrice, saleFeePercent, saleFeePerUnit, selected]);
+
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const dialog = ref.current;
@@ -66,9 +156,11 @@ export function EditorModal({
       previous?.focus();
     };
   }, [onClose]);
+
   const title = fixed
     ? "Custos fixos mensais"
     : `${item ? "Editar" : "Adicionar"} ${section === "Insumos" ? "insumo" : section === "Produtos" ? "produto" : section === "Vendas" ? "venda" : "despesa"}`;
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
@@ -102,7 +194,10 @@ export function EditorModal({
             price: value("price"),
             feePercent: value("feePercent"),
             feePerUnit: value("feePerUnit"),
-            recipe,
+            recipe: recipe.map(({ ingredientId, quantity }) => ({
+              ingredientId,
+              quantity,
+            })),
           },
           item?.id,
         );
@@ -118,13 +213,17 @@ export function EditorModal({
           feePerUnit: value("feePerUnit"),
         });
       else
-        await api.save("expenses", {
-          description: text("description"),
-          category: text("category"),
-          date: text("date"),
-          amount: value("amount"),
-          isFixed: text("type") === "fixed",
-        });
+        await api.save(
+          "expenses",
+          {
+            description: text("description"),
+            category: text("category"),
+            date: text("date"),
+            amount: value("amount"),
+            isFixed: text("type") === "fixed",
+          },
+          item?.id,
+        );
       onSaved();
     } catch (e) {
       setError((e as Error).message);
@@ -132,8 +231,14 @@ export function EditorModal({
       setBusy(false);
     }
   }
+
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
+    >
       <section
         className="modal"
         ref={ref}
@@ -175,7 +280,7 @@ export function EditorModal({
               <Field
                 label="Nome do insumo"
                 name="name"
-                value={(item as Ingredient)?.name}
+                value={ingredient?.name}
                 type="text"
                 maxLength={120}
               />
@@ -184,7 +289,8 @@ export function EditorModal({
                   Unidade base
                   <select
                     name="unit"
-                    defaultValue={(item as Ingredient)?.unit ?? "g"}
+                    defaultValue={ingredient?.unit ?? "g"}
+                    onChange={(e) => setIngUnit(e.target.value)}
                   >
                     <option value="g">Gramas (g)</option>
                     <option value="ml">Mililitros (ml)</option>
@@ -194,15 +300,25 @@ export function EditorModal({
                 <Field
                   label="Quantidade comprada"
                   name="purchaseQuantity"
-                  value={(item as Ingredient)?.purchaseQuantity}
+                  value={ingredient?.purchaseQuantity}
                   positive
+                  onChange={(v) => setIngQty(Number(v))}
                 />
               </div>
               <Field
                 label="Valor total da compra (R$)"
                 name="purchasePrice"
-                value={(item as Ingredient)?.purchasePrice}
+                value={ingredient?.purchasePrice}
+                onChange={(v) => setIngPrice(Number(v))}
               />
+              {ingQty > 0 && ingPrice >= 0 && (
+                <div className="live-preview">
+                  <span>Custo unitário calculado</span>
+                  <strong>
+                    {brlUnit(ingPrice / ingQty)} / {ingUnit}
+                  </strong>
+                </div>
+              )}
               <p className="form-hint">
                 Converta kg para g e litros para ml. Ex.: 1 kg = 1.000 g. Use a
                 mesma unidade na ficha técnica.
@@ -230,8 +346,9 @@ export function EditorModal({
               <Field
                 label="Preço de venda (R$)"
                 name="price"
-                value={product?.price}
+                value={suggestedPrice ?? product?.price}
                 positive
+                onChange={(v) => setProdPrice(Number(v))}
               />
               <div className="form-grid">
                 <Field
@@ -239,11 +356,13 @@ export function EditorModal({
                   name="feePercent"
                   value={product?.feePercent ?? 0}
                   max={100}
+                  onChange={(v) => setProdFeePercent(Number(v))}
                 />
                 <Field
                   label="Taxa por garrafa (R$)"
                   name="feePerUnit"
                   value={product?.feePerUnit ?? 0}
+                  onChange={(v) => setProdFeePerUnit(Number(v))}
                 />
               </div>
               <div className="recipe-heading">
@@ -253,7 +372,14 @@ export function EditorModal({
                   className="text-button"
                   disabled={recipe.length >= data.ingredients.length}
                   onClick={() =>
-                    setRecipe([...recipe, { ingredientId: "", quantity: 1 }])
+                    setRecipe([
+                      ...recipe,
+                      {
+                        key: nextRowKey.current++,
+                        ingredientId: "",
+                        quantity: 1,
+                      },
+                    ])
                   }
                 >
                   <Plus size={16} /> Insumo
@@ -265,7 +391,7 @@ export function EditorModal({
                 </p>
               )}
               {recipe.map((row, index) => (
-                <div className="recipe-row" key={index}>
+                <div className="recipe-row" key={row.key}>
                   <label>
                     Insumo
                     <select
@@ -273,8 +399,8 @@ export function EditorModal({
                       value={row.ingredientId}
                       onChange={(e) =>
                         setRecipe(
-                          recipe.map((r, i) =>
-                            i === index
+                          recipe.map((r) =>
+                            r.key === row.key
                               ? { ...r, ingredientId: e.target.value }
                               : r,
                           ),
@@ -287,7 +413,8 @@ export function EditorModal({
                           key={x.id}
                           value={x.id}
                           disabled={recipe.some(
-                            (r, i) => i !== index && r.ingredientId === x.id,
+                            (r) =>
+                              r.key !== row.key && r.ingredientId === x.id,
                           )}
                         >
                           {x.name} ({x.unit})
@@ -303,12 +430,12 @@ export function EditorModal({
                       required
                       min="0.000001"
                       max="1000000"
-                      step="0.000001"
+                      step="any"
                       value={row.quantity}
                       onChange={(e) =>
                         setRecipe(
-                          recipe.map((r, i) =>
-                            i === index
+                          recipe.map((r) =>
+                            r.key === row.key
                               ? { ...r, quantity: Number(e.target.value) }
                               : r,
                           ),
@@ -322,13 +449,45 @@ export function EditorModal({
                     disabled={recipe.length === 1}
                     aria-label={`Remover insumo ${index + 1}`}
                     onClick={() =>
-                      setRecipe(recipe.filter((_, i) => i !== index))
+                      setRecipe(recipe.filter((r) => r.key !== row.key))
                     }
                   >
                     <Trash2 size={17} />
                   </button>
                 </div>
               ))}
+              {prodPrice > 0 && (
+                <div className="live-preview-grid">
+                  <div>
+                    <small>CMV / garrafa</small>
+                    <strong>{brl(productPreview.unitCost)}</strong>
+                  </div>
+                  <div>
+                    <small>Taxas</small>
+                    <strong>{brl(productPreview.fee)}</strong>
+                  </div>
+                  <div>
+                    <small>Contribuição</small>
+                    <strong
+                      className={
+                        productPreview.contribution <= 0 ? "text-bad" : ""
+                      }
+                    >
+                      {brl(productPreview.contribution)}
+                    </strong>
+                  </div>
+                  <div>
+                    <small>Margem</small>
+                    <strong
+                      className={
+                        productPreview.contribution <= 0 ? "text-bad" : ""
+                      }
+                    >
+                      {pct(productPreview.margin)}
+                    </strong>
+                  </div>
+                </div>
+              )}
               <p className="form-hint">
                 Inclua a polpa, complementos, garrafa e tampa. Os custos
                 acompanham os preços atuais dos insumos.
@@ -368,6 +527,7 @@ export function EditorModal({
                   name="quantity"
                   value={1}
                   positive
+                  onChange={(v) => setSaleQty(Number(v))}
                 />
               </div>
               <div key={saleProduct}>
@@ -376,6 +536,7 @@ export function EditorModal({
                   name="price"
                   value={selected?.price}
                   positive
+                  onChange={(v) => setSalePrice(Number(v))}
                 />
                 <div className="form-grid">
                   <Field
@@ -383,11 +544,13 @@ export function EditorModal({
                     name="feePercent"
                     value={selected?.feePercent ?? 0}
                     max={100}
+                    onChange={(v) => setSaleFeePercent(Number(v))}
                   />
                   <Field
                     label="Taxa por garrafa (R$)"
                     name="feePerUnit"
                     value={selected?.feePerUnit ?? 0}
+                    onChange={(v) => setSaleFeePerUnit(Number(v))}
                   />
                 </div>
               </div>
@@ -411,6 +574,30 @@ export function EditorModal({
                   </select>
                 </label>
               </div>
+              {selected && saleQty > 0 && salePrice > 0 && (
+                <div className="live-preview-grid">
+                  <div>
+                    <small>Total da venda</small>
+                    <strong>{brl(salePreview.total)}</strong>
+                  </div>
+                  <div>
+                    <small>CMV total</small>
+                    <strong>{brl(salePreview.totalCost)}</strong>
+                  </div>
+                  <div>
+                    <small>Taxas</small>
+                    <strong>{brl(salePreview.totalFees)}</strong>
+                  </div>
+                  <div>
+                    <small>Contribuição</small>
+                    <strong
+                      className={salePreview.contribution <= 0 ? "text-bad" : ""}
+                    >
+                      {brl(salePreview.contribution)}
+                    </strong>
+                  </div>
+                </div>
+              )}
               <p className="form-hint">
                 CMV atual: {brl(selected?.unitCost ?? 0)} / garrafa. Preço,
                 custo e taxas serão preservados no histórico.
@@ -421,6 +608,7 @@ export function EditorModal({
               <Field
                 label="Descrição"
                 name="description"
+                value={expense?.description}
                 type="text"
                 maxLength={180}
               />
@@ -428,13 +616,17 @@ export function EditorModal({
                 <Field
                   label="Categoria"
                   name="category"
+                  value={expense?.category}
                   type="text"
                   maxLength={80}
                   placeholder="Ex.: Energia"
                 />
                 <label>
                   Tipo
-                  <select name="type">
+                  <select
+                    name="type"
+                    defaultValue={expense?.isFixed ? "fixed" : "variable"}
+                  >
                     <option value="variable">Variável</option>
                     <option value="fixed">Fixa</option>
                   </select>
@@ -445,9 +637,14 @@ export function EditorModal({
                   label="Data da despesa"
                   name="date"
                   type="date"
-                  value={today()}
+                  value={expense?.date ?? today()}
                 />
-                <Field label="Valor (R$)" name="amount" positive />
+                <Field
+                  label="Valor (R$)"
+                  name="amount"
+                  value={expense?.amount}
+                  positive
+                />
               </div>
               <p className="form-hint">
                 Evite registrar novamente o CMV e as taxas já incluídas nas
@@ -488,6 +685,7 @@ export function EditorModal({
     </div>
   );
 }
+
 function Field({
   label,
   name,
@@ -495,6 +693,7 @@ function Field({
   type = "number",
   positive,
   max = 1000000,
+  onChange,
   ...props
 }: {
   label: string;
@@ -505,6 +704,7 @@ function Field({
   max?: number;
   maxLength?: number;
   placeholder?: string;
+  onChange?: (val: string) => void;
 }) {
   return (
     <label>
@@ -515,8 +715,9 @@ function Field({
         type={type}
         defaultValue={value}
         required
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         {...(type === "number"
-          ? { min: positive ? 0.000001 : 0, max, step: "0.000001" }
+          ? { min: positive ? 0.000001 : 0, max, step: "any" }
           : type === "date"
             ? { min: "2000-01-01", max: "2100-12-31" }
             : {})}

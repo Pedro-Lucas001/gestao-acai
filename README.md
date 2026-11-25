@@ -5,15 +5,16 @@ Organizador financeiro de uso pessoal, com identidade visual da Netuno Açaí: r
 ## Funcionalidades
 
 - Abertura animada com a logo e acesso direto ao painel, sem usuário ou senha. A animação pode ser pulada e respeita a preferência por movimento reduzido.
-- Insumos em g, ml ou unidade, com quantidade/preço de compra e custo unitário. Edição e exclusão com proteção de vínculos.
-- Produtos com tamanho, ficha técnica por garrafa, preço e taxas padrão. Custos recalculados a partir dos insumos vigentes.
-- Vendas com preço e taxas editáveis por operação. Quantidade, nome, preço, CMV e taxa unitária ficam preservados no histórico.
-- Despesas fixas/variáveis por data e categoria, com exclusão confirmada.
-- Dashboard, gráfico diário, busca, filtros por período e comparação de rentabilidade dos produtos.
-- Custos fixos mensais previstos e ponto de equilíbrio baseado na contribuição média das vendas do período.
+- Insumos em g, ml ou unidade, com quantidade/preço de compra, cálculo de custo unitário em tempo real, edição e exclusão com proteção de vínculos.
+- Produtos com tamanho, ficha técnica por garrafa, preço, taxas padrão e prévia imediata de CMV, contribuição e margem. Custos recalculados a partir dos insumos vigentes.
+- Vendas com preço e taxas editáveis por operação, prévia ao vivo antes de salvar e exclusão confirmada. Quantidade, nome, preço, CMV e taxa unitária ficam preservados no histórico.
+- Despesas fixas/variáveis por data e categoria, com edição, resumo do período e exclusão confirmada.
+- Dashboard, gráfico diário, divisão por canal de venda, busca por campos reais, filtros por período e comparação de rentabilidade dos produtos.
+- Custos fixos mensais previstos, simulador interativo de preço por margem desejada e ponto de equilíbrio baseado na contribuição média das vendas do período.
+- Modo local automático no navegador quando publicado como site estático (como Vercel sem backend configurado), com exportação e importação de backup JSON. Com a API/PostgreSQL ativos localmente, os dados usam o banco real e falhas de servidor continuam sendo exibidas normalmente.
 - Interface responsiva em pt-BR/BRL, estados de carregamento/erro e formulários que preservam o preenchimento se a gravação falhar.
 
-A interface usa a API real. Banco indisponível aparece como erro; não há dados fictícios nem preenchimento automático de vendas. Estoque, produção, validade, contas a receber e emissão fiscal continuam fora deste MVP.
+A interface usa a API real quando disponível e não possui dados fictícios nem preenchimento automático de vendas. Estoque, produção, validade, contas a receber e emissão fiscal continuam fora deste MVP.
 
 ## Começar pelo VS Code (Windows)
 
