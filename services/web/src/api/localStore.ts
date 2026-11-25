@@ -1,3 +1,6 @@
+import { loadExtras, saveExtras } from "../extras";
+import type { WorkspaceExtras } from "../extras";
+import { previousPeriod } from "../reports";
 import type {
   DashboardSummary,
   Expense,
@@ -21,17 +24,41 @@ interface StoredProduct {
   recipe: RecipeItem[];
 }
 
-interface StoredSale {
-  id: string;
-  date: string;
+interface StoredSaleItem {
   productId: string;
   productName: string;
-  channel: string;
-  paymentMethod: string;
   quantity: number;
   salePriceSnapshot: number;
   unitCostSnapshot: number;
   variableFeeSnapshot: number;
+}
+
+interface StoredSale {
+  id: string;
+  date: string;
+  productId?: string;
+  productName?: string;
+  channel: string;
+  paymentMethod: string;
+  quantity?: number;
+  salePriceSnapshot?: number;
+  unitCostSnapshot?: number;
+  variableFeeSnapshot?: number;
+  items?: StoredSaleItem[];
+}
+
+function saleItemsOf(sale: StoredSale): StoredSaleItem[] {
+  if (Array.isArray(sale.items) && sale.items.length > 0) return sale.items;
+  return [
+    {
+      productId: sale.productId ?? "",
+      productName: sale.productName ?? "",
+      quantity: sale.quantity ?? 0,
+      salePriceSnapshot: sale.salePriceSnapshot ?? 0,
+      unitCostSnapshot: sale.unitCostSnapshot ?? 0,
+      variableFeeSnapshot: sale.variableFeeSnapshot ?? 0,
+    },
+  ];
 }
 
 interface LocalDatabase {
@@ -162,22 +189,87 @@ function toProductView(
 }
 
 function toSaleView(sale: StoredSale): Sale {
-  const total = round6(sale.quantity * sale.salePriceSnapshot);
+  const items = saleItemsOf(sale);
+  const quantity = round6(items.reduce((sum, x) => sum + x.quantity, 0));
+  const total = round6(
+    items.reduce((sum, x) => sum + x.quantity * x.salePriceSnapshot, 0),
+  );
   const contribution = round6(
-    sale.quantity *
-      (sale.salePriceSnapshot -
-        sale.unitCostSnapshot -
-        sale.variableFeeSnapshot),
+    items.reduce(
+      (sum, x) =>
+        sum +
+        x.quantity *
+          (x.salePriceSnapshot - x.unitCostSnapshot - x.variableFeeSnapshot),
+      0,
+    ),
   );
   return {
     id: sale.id,
     date: sale.date,
-    productName: sale.productName,
+    productName: items.map((x) => x.productName).join(", "),
     channel: sale.channel,
     paymentMethod: sale.paymentMethod,
-    quantity: sale.quantity,
+    quantity,
     total,
     contribution,
+  };
+}
+
+function summarize(db: LocalDatabase, period: Period): DashboardSummary {
+  const filteredSales = db.sales.filter(
+    (s) => s.date >= period.from && s.date <= period.to,
+  );
+  const items = filteredSales.flatMap(saleItemsOf);
+  const expenses = db.expenses.filter(
+    (e) => e.date >= period.from && e.date <= period.to,
+  );
+
+  const revenue = round6(
+    items.reduce((sum, x) => sum + x.quantity * x.salePriceSnapshot, 0),
+  );
+  const cost = round6(
+    items.reduce((sum, x) => sum + x.quantity * x.unitCostSnapshot, 0),
+  );
+  const fees = round6(
+    items.reduce((sum, x) => sum + x.quantity * x.variableFeeSnapshot, 0),
+  );
+  const totalExpenses = round6(
+    expenses.reduce((sum, e) => sum + e.amount, 0),
+  );
+  const contribution = round6(revenue - cost - fees);
+  const quantity = round6(items.reduce((sum, x) => sum + x.quantity, 0));
+  const averageMargin = revenue > 0 ? (contribution / revenue) * 100 : 0;
+  const avgContributionPerUnit = quantity > 0 ? contribution / quantity : 0;
+  const breakEvenUnits =
+    quantity > 0 && avgContributionPerUnit > 0
+      ? Math.ceil(db.monthlyFixedCosts / avgContributionPerUnit)
+      : null;
+
+  const dailyMap = new Map<string, number>();
+  for (const s of filteredSales) {
+    const saleRev = saleItemsOf(s).reduce(
+      (sum, x) => sum + x.quantity * x.salePriceSnapshot,
+      0,
+    );
+    dailyMap.set(s.date, round6((dailyMap.get(s.date) ?? 0) + saleRev));
+  }
+  const daily = Array.from(dailyMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, rev]) => ({ date, revenue: rev }));
+
+  return {
+    revenue,
+    cost,
+    fees,
+    expenses: totalExpenses,
+    contribution,
+    netResult: round6(contribution - totalExpenses),
+    salesCount: filteredSales.length,
+    quantity,
+    averageMargin,
+    monthlyFixedCosts: db.monthlyFixedCosts,
+    breakEvenUnits,
+    daily,
   };
 }
 
@@ -205,65 +297,14 @@ export const localStore = {
       .filter((e) => e.date >= period.from && e.date <= period.to)
       .sort((a, b) => b.date.localeCompare(a.date));
 
-    const revenue = round6(
-      filteredSales.reduce(
-        (sum, s) => sum + s.quantity * s.salePriceSnapshot,
-        0,
-      ),
-    );
-    const cost = round6(
-      filteredSales.reduce(
-        (sum, s) => sum + s.quantity * s.unitCostSnapshot,
-        0,
-      ),
-    );
-    const fees = round6(
-      filteredSales.reduce(
-        (sum, s) => sum + s.quantity * s.variableFeeSnapshot,
-        0,
-      ),
-    );
-    const totalExpenses = round6(
-      expenses.reduce((sum, e) => sum + e.amount, 0),
-    );
-    const contribution = round6(revenue - cost - fees);
-    const quantity = round6(
-      filteredSales.reduce((sum, s) => sum + s.quantity, 0),
-    );
-    const averageMargin = revenue > 0 ? (contribution / revenue) * 100 : 0;
-    const avgContributionPerUnit = quantity > 0 ? contribution / quantity : 0;
-    const breakEvenUnits =
-      quantity > 0 && avgContributionPerUnit > 0
-        ? Math.ceil(db.monthlyFixedCosts / avgContributionPerUnit)
-        : null;
+    const summary = summarize(db, period);
+    const prev = previousPeriod(period);
+    const previousSummary =
+      prev.from !== period.from || prev.to !== period.to
+        ? summarize(db, prev)
+        : undefined;
 
-    const dailyMap = new Map<string, number>();
-    for (const s of filteredSales) {
-      dailyMap.set(
-        s.date,
-        round6((dailyMap.get(s.date) ?? 0) + s.quantity * s.salePriceSnapshot),
-      );
-    }
-    const daily = Array.from(dailyMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, rev]) => ({ date, revenue: rev }));
-
-    const summary: DashboardSummary = {
-      revenue,
-      cost,
-      fees,
-      expenses: totalExpenses,
-      contribution,
-      netResult: round6(contribution - totalExpenses),
-      salesCount: filteredSales.length,
-      quantity,
-      averageMargin,
-      monthlyFixedCosts: db.monthlyFixedCosts,
-      breakEvenUnits,
-      daily,
-    };
-
-    return { summary, ingredients, products, sales, expenses };
+    return { summary, previousSummary, ingredients, products, sales, expenses };
   },
 
   save(path: string, body: Record<string, unknown>, id?: string): unknown {
@@ -376,32 +417,52 @@ export const localStore = {
 
     if (path === "sales") {
       const date = requireDate(body.date);
-      const quantity = requireNumber(body.quantity, true);
-      const price = requireNumber(body.price, true);
-      const feePercent = requireNumber(body.feePercent, false, 100);
-      const feePerUnit = requireNumber(body.feePerUnit);
       const channel = requireText(body.channel, 60);
       const paymentMethod = requireText(body.paymentMethod, 60);
-      const productId = String(body.productId ?? "");
-      const product = db.products.find((p) => p.id === productId);
-      if (!product) throw new Error("Produto não encontrado.");
-      if (!product.recipe.length) {
-        throw new Error("Complete a ficha técnica antes de vender.");
+      const rawItems =
+        Array.isArray(body.items) && body.items.length > 0
+          ? (body.items as Record<string, unknown>[])
+          : [
+              {
+                productId: body.productId,
+                quantity: body.quantity,
+                price: body.price,
+                feePercent: body.feePercent,
+                feePerUnit: body.feePerUnit,
+              },
+            ];
+      if (rawItems.length > 50) {
+        throw new Error("Inclua até 50 itens por venda.");
       }
       const ingredientsById = new Map(db.ingredients.map((x) => [x.id, x]));
-      const cost = round6(unitCostOf(product.recipe, ingredientsById));
-      const variableFee = round6(feeOf(price, feePercent, feePerUnit));
+      const storedItems: StoredSaleItem[] = rawItems.map((line) => {
+        const quantity = requireNumber(line.quantity, true);
+        const price = requireNumber(line.price, true);
+        const feePercent = requireNumber(line.feePercent, false, 100);
+        const feePerUnit = requireNumber(line.feePerUnit);
+        const productId = String(line.productId ?? "");
+        const product = db.products.find((p) => p.id === productId);
+        if (!product) throw new Error("Produto não encontrado.");
+        if (!product.recipe.length) {
+          throw new Error("Complete a ficha técnica antes de vender.");
+        }
+        const cost = round6(unitCostOf(product.recipe, ingredientsById));
+        const variableFee = round6(feeOf(price, feePercent, feePerUnit));
+        return {
+          productId: product.id,
+          productName: `${product.name} · ${product.size}`,
+          quantity,
+          salePriceSnapshot: price,
+          unitCostSnapshot: cost,
+          variableFeeSnapshot: variableFee,
+        };
+      });
       const sale: StoredSale = {
         id: newId(),
         date,
-        productId: product.id,
-        productName: `${product.name} · ${product.size}`,
         channel,
         paymentMethod,
-        quantity,
-        salePriceSnapshot: price,
-        unitCostSnapshot: cost,
-        variableFeeSnapshot: variableFee,
+        items: storedItems,
       };
       db.sales.push(sale);
       writeDb(db);
@@ -462,7 +523,11 @@ export const localStore = {
     if (path === "products") {
       const exists = db.products.some((x) => x.id === id);
       if (!exists) throw new Error("Produto não encontrado.");
-      if (db.sales.some((s) => s.productId === id)) {
+      if (
+        db.sales.some((s) =>
+          saleItemsOf(s).some((item) => item.productId === id),
+        )
+      ) {
         throw new Error(
           "Este produto possui vendas registradas e não pode ser excluído.",
         );
@@ -492,7 +557,11 @@ export const localStore = {
   },
 
   exportBackup(): string {
-    return JSON.stringify(readDb(), null, 2);
+    return JSON.stringify(
+      { ...readDb(), extras: loadExtras() },
+      null,
+      2,
+    );
   },
 
   importBackup(raw: string): void {
@@ -505,7 +574,9 @@ export const localStore = {
     if (!parsed || typeof parsed !== "object") {
       throw new Error("Formato de backup inválido.");
     }
-    const candidate = parsed as Partial<LocalDatabase>;
+    const candidate = parsed as Partial<LocalDatabase> & {
+      extras?: WorkspaceExtras;
+    };
     if (
       !Array.isArray(candidate.ingredients) ||
       !Array.isArray(candidate.products) ||
@@ -529,5 +600,14 @@ export const localStore = {
           ? candidate.monthlyFixedCosts
           : 0,
     });
+    if (candidate.extras && typeof candidate.extras === "object") {
+      saveExtras({
+        stock: candidate.extras.stock ?? {},
+        goals: candidate.extras.goals ?? { revenueGoal: 0, unitsGoal: 0 },
+        recurringExpenses: Array.isArray(candidate.extras.recurringExpenses)
+          ? candidate.extras.recurringExpenses
+          : [],
+      });
+    }
   },
 };

@@ -9,36 +9,72 @@ import type {
   Section,
   Snapshot,
 } from "./api/types";
+import {
+  addRecurringExpense,
+  deductStockForSaleItems,
+  saveMonthlyGoals,
+  updateIngredientStock,
+} from "./extras";
+import type { WorkspaceExtras } from "./extras";
 import { brl, brlUnit, pct, today } from "./format";
 
 export type Editor = {
   section: Section;
   item?: Ingredient | Product | Expense;
   fixed?: boolean;
+  goals?: boolean;
+  stockItem?: Ingredient;
+  duplicate?: Product;
+  presetProductId?: string;
   suggestedPrice?: number;
 };
 
 type RecipeRow = { key: number; ingredientId: string; quantity: number };
+type ExtraSaleItem = {
+  key: number;
+  productId: string;
+  quantity: number;
+  price: number;
+  feePercent: number;
+  feePerUnit: number;
+};
 
 export function EditorModal({
   editor,
   data,
+  extras,
+  onExtrasChanged,
   onClose,
   onSaved,
 }: {
   editor: Editor;
   data: Snapshot;
+  extras: WorkspaceExtras;
+  onExtrasChanged: (next: WorkspaceExtras) => void;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (message?: string) => void;
 }) {
-  const { section, item, fixed, suggestedPrice } = editor;
-  const ingredient = section === "Insumos" ? (item as Ingredient | undefined) : undefined;
-  const product = section === "Produtos" ? (item as Product | undefined) : undefined;
-  const expense = section === "Despesas" ? (item as Expense | undefined) : undefined;
+  const {
+    section,
+    item,
+    fixed,
+    goals,
+    stockItem,
+    duplicate,
+    presetProductId,
+    suggestedPrice,
+  } = editor;
+  const ingredient =
+    section === "Insumos" ? (item as Ingredient | undefined) : undefined;
+  const product =
+    section === "Produtos" ? (item as Product | undefined) : undefined;
+  const productSeed = duplicate ?? product;
+  const expense =
+    section === "Despesas" ? (item as Expense | undefined) : undefined;
 
   const nextRowKey = useRef(1);
   const [recipe, setRecipe] = useState<RecipeRow[]>(() =>
-    (product?.recipe ?? [{ ingredientId: "", quantity: 1 }]).map((row) => ({
+    (productSeed?.recipe ?? [{ ingredientId: "", quantity: 1 }]).map((row) => ({
       key: nextRowKey.current++,
       ingredientId: row.ingredientId,
       quantity: row.quantity,
@@ -47,22 +83,28 @@ export function EditorModal({
 
   // Live preview states for Insumos
   const [ingUnit, setIngUnit] = useState(ingredient?.unit ?? "g");
-  const [ingQty, setIngQty] = useState<number>(ingredient?.purchaseQuantity ?? 0);
-  const [ingPrice, setIngPrice] = useState<number>(ingredient?.purchasePrice ?? 0);
+  const [ingQty, setIngQty] = useState<number>(
+    ingredient?.purchaseQuantity ?? 0,
+  );
+  const [ingPrice, setIngPrice] = useState<number>(
+    ingredient?.purchasePrice ?? 0,
+  );
 
   // Live preview states for Produtos
   const [prodPrice, setProdPrice] = useState<number>(
-    suggestedPrice ?? product?.price ?? 0,
+    suggestedPrice ?? productSeed?.price ?? 0,
   );
   const [prodFeePercent, setProdFeePercent] = useState<number>(
-    product?.feePercent ?? 0,
+    productSeed?.feePercent ?? 0,
   );
   const [prodFeePerUnit, setProdFeePerUnit] = useState<number>(
-    product?.feePerUnit ?? 0,
+    productSeed?.feePerUnit ?? 0,
   );
 
-  // Live preview states for Vendas
-  const [saleProduct, setSaleProduct] = useState(data.products[0]?.id ?? "");
+  // Live preview states for Vendas (primary item + optional multi-item cart)
+  const [saleProduct, setSaleProduct] = useState(
+    presetProductId ?? data.products[0]?.id ?? "",
+  );
   const selected = data.products.find((x) => x.id === saleProduct);
   const [saleQty, setSaleQty] = useState<number>(1);
   const [salePrice, setSalePrice] = useState<number>(selected?.price ?? 0);
@@ -72,6 +114,8 @@ export function EditorModal({
   const [saleFeePerUnit, setSaleFeePerUnit] = useState<number>(
     selected?.feePerUnit ?? 0,
   );
+  const [extraItems, setExtraItems] = useState<ExtraSaleItem[]>([]);
+  const [saveAsRecurring, setSaveAsRecurring] = useState(false);
 
   useEffect(() => {
     if (selected) {
@@ -90,6 +134,10 @@ export function EditorModal({
   const ingredientsById = useMemo(
     () => new Map(data.ingredients.map((x) => [x.id, x])),
     [data.ingredients],
+  );
+  const productsById = useMemo(
+    () => new Map(data.products.map((x) => [x.id, x])),
+    [data.products],
   );
 
   const productPreview = useMemo(() => {
@@ -110,18 +158,47 @@ export function EditorModal({
   }, [recipe, ingredientsById, prodPrice, prodFeePercent, prodFeePerUnit]);
 
   const salePreview = useMemo(() => {
-    const qty = Number.isFinite(saleQty) && saleQty > 0 ? saleQty : 0;
-    const price = Number.isFinite(salePrice) && salePrice > 0 ? salePrice : 0;
-    const unitCost = selected?.unitCost ?? 0;
-    const unitFee =
-      (price * (Number.isFinite(saleFeePercent) ? saleFeePercent : 0)) / 100 +
-      (Number.isFinite(saleFeePerUnit) ? saleFeePerUnit : 0);
-    const total = qty * price;
-    const totalCost = qty * unitCost;
-    const totalFees = qty * unitFee;
-    const contribution = total - totalCost - totalFees;
-    return { total, totalCost, totalFees, contribution };
-  }, [saleQty, salePrice, saleFeePercent, saleFeePerUnit, selected]);
+    const lines = [
+      {
+        product: selected,
+        qty: Number.isFinite(saleQty) && saleQty > 0 ? saleQty : 0,
+        price: Number.isFinite(salePrice) && salePrice > 0 ? salePrice : 0,
+        feePercent: Number.isFinite(saleFeePercent) ? saleFeePercent : 0,
+        feePerUnit: Number.isFinite(saleFeePerUnit) ? saleFeePerUnit : 0,
+      },
+      ...extraItems.map((extra) => ({
+        product: productsById.get(extra.productId),
+        qty: Number.isFinite(extra.quantity) && extra.quantity > 0 ? extra.quantity : 0,
+        price: Number.isFinite(extra.price) && extra.price > 0 ? extra.price : 0,
+        feePercent: Number.isFinite(extra.feePercent) ? extra.feePercent : 0,
+        feePerUnit: Number.isFinite(extra.feePerUnit) ? extra.feePerUnit : 0,
+      })),
+    ];
+    let total = 0;
+    let totalCost = 0;
+    let totalFees = 0;
+    for (const line of lines) {
+      const unitCost = line.product?.unitCost ?? 0;
+      const unitFee = (line.price * line.feePercent) / 100 + line.feePerUnit;
+      total += line.qty * line.price;
+      totalCost += line.qty * unitCost;
+      totalFees += line.qty * unitFee;
+    }
+    return {
+      total,
+      totalCost,
+      totalFees,
+      contribution: total - totalCost - totalFees,
+    };
+  }, [
+    saleQty,
+    salePrice,
+    saleFeePercent,
+    saleFeePerUnit,
+    selected,
+    extraItems,
+    productsById,
+  ]);
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -159,7 +236,33 @@ export function EditorModal({
 
   const title = fixed
     ? "Custos fixos mensais"
-    : `${item ? "Editar" : "Adicionar"} ${section === "Insumos" ? "insumo" : section === "Produtos" ? "produto" : section === "Vendas" ? "venda" : "despesa"}`;
+    : goals
+      ? "Metas do mês"
+      : stockItem
+        ? `Estoque · ${stockItem.name}`
+        : duplicate
+          ? "Duplicar produto"
+          : `${item ? "Editar" : "Adicionar"} ${section === "Insumos" ? "insumo" : section === "Produtos" ? "produto" : section === "Vendas" ? "venda" : "despesa"}`;
+
+  function addExtraSaleItem() {
+    const fallback =
+      data.products.find(
+        (p) =>
+          p.id !== saleProduct && !extraItems.some((e) => e.productId === p.id),
+      ) ?? data.products[0];
+    if (!fallback) return;
+    setExtraItems([
+      ...extraItems,
+      {
+        key: nextRowKey.current++,
+        productId: fallback.id,
+        quantity: 1,
+        price: fallback.price,
+        feePercent: fallback.feePercent,
+        feePerUnit: fallback.feePerUnit,
+      },
+    ]);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,6 +273,24 @@ export function EditorModal({
     setBusy(true);
     setError("");
     try {
+      if (goals) {
+        const next = saveMonthlyGoals({
+          revenueGoal: value("revenueGoal"),
+          unitsGoal: value("unitsGoal"),
+        });
+        onExtrasChanged(next);
+        onSaved("Metas atualizadas com sucesso.");
+        return;
+      }
+      if (stockItem) {
+        const next = updateIngredientStock(stockItem.id, {
+          currentStock: value("currentStock"),
+          minStock: value("minStock"),
+        });
+        onExtrasChanged(next);
+        onSaved("Estoque atualizado com sucesso.");
+        return;
+      }
       if (fixed)
         await request("fixed-costs", "PUT", {
           monthlyAmount: value("monthlyAmount"),
@@ -199,31 +320,64 @@ export function EditorModal({
               quantity,
             })),
           },
-          item?.id,
+          duplicate ? undefined : item?.id,
         );
-      else if (section === "Vendas")
-        await api.save("sales", {
-          date: text("date"),
+      else if (section === "Vendas") {
+        const primary = {
           productId: saleProduct,
           quantity: value("quantity"),
           price: value("price"),
-          channel: text("channel"),
-          paymentMethod: text("paymentMethod"),
           feePercent: value("feePercent"),
           feePerUnit: value("feePerUnit"),
-        });
-      else
-        await api.save(
-          "expenses",
-          {
-            description: text("description"),
-            category: text("category"),
+        };
+        if (extraItems.length > 0) {
+          const allItems = [
+            primary,
+            ...extraItems.map((x) => ({
+              productId: x.productId,
+              quantity: x.quantity,
+              price: x.price,
+              feePercent: x.feePercent,
+              feePerUnit: x.feePerUnit,
+            })),
+          ];
+          await api.save("sales", {
             date: text("date"),
-            amount: value("amount"),
-            isFixed: text("type") === "fixed",
-          },
-          item?.id,
-        );
+            ...primary,
+            channel: text("channel"),
+            paymentMethod: text("paymentMethod"),
+            items: allItems,
+          });
+          onExtrasChanged(deductStockForSaleItems(data.products, allItems));
+        } else {
+          await api.save("sales", {
+            date: text("date"),
+            ...primary,
+            channel: text("channel"),
+            paymentMethod: text("paymentMethod"),
+          });
+          onExtrasChanged(deductStockForSaleItems(data.products, [primary]));
+        }
+      } else {
+        const payload = {
+          description: text("description"),
+          category: text("category"),
+          date: text("date"),
+          amount: value("amount"),
+          isFixed: text("type") === "fixed",
+        };
+        await api.save("expenses", payload, item?.id);
+        if (!item && saveAsRecurring) {
+          onExtrasChanged(
+            addRecurringExpense({
+              description: payload.description,
+              category: payload.category,
+              amount: payload.amount,
+              isFixed: payload.isFixed,
+            }),
+          );
+        }
+      }
       onSaved();
     } catch (e) {
       setError((e as Error).message);
@@ -231,6 +385,8 @@ export function EditorModal({
       setBusy(false);
     }
   }
+
+  const currentStock = stockItem ? extras.stock[stockItem.id] : undefined;
 
   return (
     <div
@@ -262,7 +418,62 @@ export function EditorModal({
           </button>
         </div>
         <form onSubmit={submit}>
-          {fixed ? (
+          {goals ? (
+            <>
+              <p className="muted">
+                Defina suas metas mensais para acompanhar o progresso direto na
+                Visão geral. Deixe 0 para desativar uma meta.
+              </p>
+              <div className="form-grid">
+                <Field
+                  label="Meta de faturamento (R$)"
+                  name="revenueGoal"
+                  value={extras.goals.revenueGoal}
+                />
+                <Field
+                  label="Meta de garrafas"
+                  name="unitsGoal"
+                  value={extras.goals.unitsGoal}
+                />
+              </div>
+            </>
+          ) : stockItem ? (
+            <>
+              <p className="muted">
+                Informe a quantidade disponível em{" "}
+                <strong>{stockItem.unit}</strong>. Cada venda registrada abate
+                automaticamente este estoque pela ficha técnica.
+              </p>
+              <div className="form-grid">
+                <Field
+                  label={`Estoque atual (${stockItem.unit})`}
+                  name="currentStock"
+                  value={currentStock?.currentStock ?? 0}
+                />
+                <Field
+                  label={`Alerta mínimo (${stockItem.unit})`}
+                  name="minStock"
+                  value={currentStock?.minStock ?? 0}
+                />
+              </div>
+              {currentStock && (
+                <div className="stock-clear-row">
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      onExtrasChanged(
+                        updateIngredientStock(stockItem.id, null),
+                      );
+                      onSaved("Controle de estoque removido para este insumo.");
+                    }}
+                  >
+                    Desativar controle de estoque deste insumo
+                  </button>
+                </div>
+              )}
+            </>
+          ) : fixed ? (
             <>
               <p className="muted">
                 Esta previsão alimenta o ponto de equilíbrio mensal. Para compor
@@ -330,14 +541,16 @@ export function EditorModal({
                 <Field
                   label="Nome / sabor"
                   name="name"
-                  value={product?.name}
+                  value={
+                    duplicate ? `${duplicate.name} (cópia)` : product?.name
+                  }
                   type="text"
                   maxLength={120}
                 />
                 <Field
                   label="Tamanho"
                   name="size"
-                  value={product?.size}
+                  value={productSeed?.size}
                   type="text"
                   placeholder="300 ml"
                   maxLength={40}
@@ -346,7 +559,7 @@ export function EditorModal({
               <Field
                 label="Preço de venda (R$)"
                 name="price"
-                value={suggestedPrice ?? product?.price}
+                value={suggestedPrice ?? productSeed?.price}
                 positive
                 onChange={(v) => setProdPrice(Number(v))}
               />
@@ -354,14 +567,14 @@ export function EditorModal({
                 <Field
                   label="Taxa padrão (%)"
                   name="feePercent"
-                  value={product?.feePercent ?? 0}
+                  value={productSeed?.feePercent ?? 0}
                   max={100}
                   onChange={(v) => setProdFeePercent(Number(v))}
                 />
                 <Field
                   label="Taxa por garrafa (R$)"
                   name="feePerUnit"
-                  value={product?.feePerUnit ?? 0}
+                  value={productSeed?.feePerUnit ?? 0}
                   onChange={(v) => setProdFeePerUnit(Number(v))}
                 />
               </div>
@@ -554,6 +767,105 @@ export function EditorModal({
                   />
                 </div>
               </div>
+              {data.products.length > 0 && (
+                <div className="recipe-heading">
+                  <h3>Mais sabores neste pedido</h3>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={addExtraSaleItem}
+                  >
+                    <Plus size={16} /> Adicionar sabor
+                  </button>
+                </div>
+              )}
+              {extraItems.map((extra, idx) => (
+                <div className="extra-sale-row" key={extra.key}>
+                  <label>
+                    Sabor {idx + 2}
+                    <select
+                      required
+                      value={extra.productId}
+                      onChange={(e) => {
+                        const prod = productsById.get(e.target.value);
+                        setExtraItems(
+                          extraItems.map((row) =>
+                            row.key === extra.key
+                              ? {
+                                  ...row,
+                                  productId: e.target.value,
+                                  price: prod?.price ?? row.price,
+                                  feePercent:
+                                    prod?.feePercent ?? row.feePercent,
+                                  feePerUnit:
+                                    prod?.feePerUnit ?? row.feePerUnit,
+                                }
+                              : row,
+                          ),
+                        );
+                      }}
+                    >
+                      {data.products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} · {p.size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Qtd.
+                    <input
+                      type="number"
+                      required
+                      min="0.000001"
+                      max="1000000"
+                      step="any"
+                      value={extra.quantity}
+                      onChange={(e) =>
+                        setExtraItems(
+                          extraItems.map((row) =>
+                            row.key === extra.key
+                              ? { ...row, quantity: Number(e.target.value) }
+                              : row,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    Preço (R$)
+                    <input
+                      type="number"
+                      required
+                      min="0.000001"
+                      max="1000000"
+                      step="any"
+                      value={extra.price}
+                      onChange={(e) =>
+                        setExtraItems(
+                          extraItems.map((row) =>
+                            row.key === extra.key
+                              ? { ...row, price: Number(e.target.value) }
+                              : row,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remover sabor ${idx + 2}`}
+                    onClick={() =>
+                      setExtraItems(
+                        extraItems.filter((row) => row.key !== extra.key),
+                      )
+                    }
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              ))}
               <div className="form-grid">
                 <label>
                   Canal
@@ -574,7 +886,7 @@ export function EditorModal({
                   </select>
                 </label>
               </div>
-              {selected && saleQty > 0 && salePrice > 0 && (
+              {selected && salePreview.total > 0 && (
                 <div className="live-preview-grid">
                   <div>
                     <small>Total da venda</small>
@@ -646,6 +958,19 @@ export function EditorModal({
                   positive
                 />
               </div>
+              {!expense && (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={saveAsRecurring}
+                    onChange={(e) => setSaveAsRecurring(e.target.checked)}
+                  />
+                  <span>
+                    Salvar como modelo recorrente (para lançar em 1 clique nos
+                    próximos meses)
+                  </span>
+                </label>
+              )}
               <p className="form-hint">
                 Evite registrar novamente o CMV e as taxas já incluídas nas
                 vendas.
@@ -671,9 +996,15 @@ export function EditorModal({
               disabled={
                 busy ||
                 (!fixed &&
+                  !goals &&
+                  !stockItem &&
                   section === "Produtos" &&
                   !data.ingredients.length) ||
-                (section === "Vendas" && !data.products.length)
+                (!fixed &&
+                  !goals &&
+                  !stockItem &&
+                  section === "Vendas" &&
+                  !data.products.length)
               }
             >
               {busy && <LoaderCircle className="spin" size={17} />}

@@ -292,7 +292,9 @@ test("static host 404 automatically enables browser local mode with full persist
     .click();
   await page.getByLabel("Quantidade de garrafas").fill("2");
   await page.getByRole("button", { name: "Salvar registro" }).click();
-  await expect(page.getByText("Açaí Puro · 500 ml")).toBeVisible();
+  await expect(
+    page.locator("table").getByText("Açaí Puro · 500 ml"),
+  ).toBeVisible();
 
   // Delete sale with confirmation
   await page.getByRole("button", { name: /Excluir Açaí Puro/ }).click();
@@ -329,4 +331,103 @@ test("static host 404 automatically enables browser local mode with full persist
     ),
   ).toBeTruthy();
 });
+
+test("stock auto-deduction, product duplication, multi-item sale, recurring expenses and goals work end-to-end", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/**", (route) =>
+    new URL(route.request().url()).pathname.startsWith("/api/")
+      ? route.fulfill({ status: 404, body: "Not Found" })
+      : route.continue(),
+  );
+
+  await page.goto("/");
+
+  async function navigate(name: string) {
+    if (info.project.name === "mobile")
+      await page.getByRole("button", { name: "Abrir menu" }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name, exact: true })
+      .click();
+  }
+
+  // Define monthly goals
+  await page.getByRole("button", { name: "Definir metas" }).click();
+  await page.getByLabel("Meta de faturamento (R$)").fill("500");
+  await page.getByLabel("Meta de garrafas").fill("20");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("R$ 500,00")).toBeVisible();
+
+  // Create ingredient & set stock
+  await navigate("Insumos");
+  await page.getByRole("button", { name: "Novo insumo" }).click();
+  await page.getByLabel("Nome do insumo").fill("Polpa");
+  await page.getByLabel("Unidade base").selectOption("g");
+  await page.getByLabel("Quantidade comprada").fill("1000");
+  await page.getByLabel("Valor total da compra").fill("20");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+
+  await page.getByRole("button", { name: "Controlar" }).click();
+  await page.getByLabel("Estoque atual (g)").fill("1000");
+  await page.getByLabel("Alerta mínimo (g)").fill("500");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByRole("button", { name: "1.000 g" })).toBeVisible();
+
+  // Create product and duplicate it
+  await navigate("Produtos");
+  await page.getByRole("button", { name: "Novo produto" }).click();
+  await page.getByLabel("Nome / sabor").fill("Tradicional");
+  await page.getByLabel("Tamanho", { exact: true }).fill("300 ml");
+  await page.getByLabel("Preço de venda").fill("15");
+  await page
+    .getByRole("dialog")
+    .getByRole("combobox", { name: "Insumo", exact: true })
+    .selectOption({ index: 1 });
+  await page.getByLabel("Quantidade do insumo 1").fill("300");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+
+  await page.getByRole("button", { name: "Duplicar Tradicional" }).click();
+  await page.getByLabel("Nome / sabor").fill("Morango");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Morango")).toBeVisible();
+
+  // Register multi-item sale (consumes 600g total -> stock drops to 400g <= 500g)
+  await navigate("Vendas");
+  await page
+    .getByRole("button", { name: "Registrar venda", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Adicionar sabor" }).click();
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(
+    page.locator("table").getByText(/Tradicional.*Morango|Morango.*Tradicional/),
+  ).toBeVisible();
+
+  // Verify low-stock alert and product ranking on Overview
+  await navigate("Visão geral");
+  await expect(page.getByText("Alerta de reposição de estoque:")).toBeVisible();
+  await expect(page.getByText("Ranking de sabores")).toBeVisible();
+
+  // Save recurring expense & launch with 1 click
+  await navigate("Despesas");
+  await page.getByRole("button", { name: "Nova despesa" }).click();
+  await page.getByLabel("Descrição").fill("Internet");
+  await page.getByLabel("Categoria").fill("Fixos");
+  await page.getByLabel("Tipo").selectOption("fixed");
+  await page.getByLabel("Valor (R$)").fill("100");
+  await page.getByText(/Salvar como modelo recorrente/).click();
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Despesas recorrentes")).toBeVisible();
+
+  await page.getByRole("button", { name: "Lançar hoje" }).click();
+  await expect(page.getByText("2 registros no período")).toBeVisible();
+
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+});
+
 

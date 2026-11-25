@@ -18,7 +18,8 @@ public sealed class FinanceEndpoints(GestaoDbContext db, ILogger<FinanceEndpoint
     public sealed record IngredientInput(string Name, string Unit, decimal PurchaseQuantity, decimal PurchasePrice);
     public sealed record RecipeInput(Guid IngredientId, decimal Quantity);
     public sealed record ProductInput(string Name, string Size, decimal Price, decimal FeePercent, decimal FeePerUnit, List<RecipeInput> Recipe);
-    public sealed record SaleInput(DateOnly Date, Guid ProductId, decimal Quantity, decimal Price, string Channel, string PaymentMethod, decimal FeePercent, decimal FeePerUnit);
+    public sealed record SaleItemInput(Guid ProductId, decimal Quantity, decimal Price, decimal FeePercent, decimal FeePerUnit);
+    public sealed record SaleInput(DateOnly Date, Guid ProductId, decimal Quantity, decimal Price, string Channel, string PaymentMethod, decimal FeePercent, decimal FeePerUnit, List<SaleItemInput>? Items = null);
     public sealed record ExpenseInput(string Description, string Category, DateOnly Date, decimal Amount, bool IsFixed);
     public sealed record FixedInput(decimal MonthlyAmount);
 
@@ -156,16 +157,28 @@ public sealed class FinanceEndpoints(GestaoDbContext db, ILogger<FinanceEndpoint
             return (await db.Sales.AsNoTracking().Include(x => x.Items).Where(x => x.SoldOn >= from && x.SoldOn <= to).OrderByDescending(x => x.SoldOn).ThenBy(x => x.Id).ToListAsync()).Select(SaleView).ToArray();
         }
         var input = await Body<SaleInput>(request);
-        Date(input.Date); Number(input.Quantity, true); Number(input.Price, true); Number(input.FeePercent, maximum: 100); Number(input.FeePerUnit);
+        Date(input.Date);
+        var rawItems = input.Items is { Count: > 0 }
+            ? input.Items
+            : [new SaleItemInput(input.ProductId, input.Quantity, input.Price, input.FeePercent, input.FeePerUnit)];
+        if (rawItems.Count > 50) throw new DomainError("Inclua até 50 itens por venda.");
+        foreach (var line in rawItems) { Number(line.Quantity, true); Number(line.Price, true); Number(line.FeePercent, maximum: 100); Number(line.FeePerUnit); }
         // One consistent price/cost snapshot, even when an ingredient is edited concurrently.
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead);
-        var product = await db.Products.Include(x => x.Recipe).SingleOrDefaultAsync(x => x.Id == input.ProductId) ?? throw new DomainError("Produto não encontrado.");
-        if (product.Recipe.Count == 0) throw new DomainError("Complete a ficha técnica antes de vender.");
-        var cost = Finance.UnitCost(product, await db.Ingredients.AsNoTracking().ToDictionaryAsync(x => x.Id));
-        var sale = new Sale { Id = Guid.NewGuid(), SoldOn = input.Date, Channel = Text(input.Channel, 60), PaymentMethod = Text(input.PaymentMethod, 60), Items = [new SaleItem {
-            Id = Guid.NewGuid(), ProductId = product.Id, ProductNameSnapshot = $"{product.Name} · {product.Size}", Quantity = input.Quantity,
-            SalePriceSnapshot = input.Price, UnitCostSnapshot = decimal.Round(cost, 6), VariableFeeSnapshot = decimal.Round(Finance.Fee(input.Price, input.FeePercent, input.FeePerUnit), 6)
-        }] };
+        var productIds = rawItems.Select(x => x.ProductId).Distinct().ToArray();
+        var products = await db.Products.Include(x => x.Recipe).Where(x => productIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        var ingredients = await db.Ingredients.AsNoTracking().ToDictionaryAsync(x => x.Id);
+        var saleItems = new List<SaleItem>();
+        foreach (var line in rawItems) {
+            if (!products.TryGetValue(line.ProductId, out var product)) throw new DomainError("Produto não encontrado.");
+            if (product.Recipe.Count == 0) throw new DomainError("Complete a ficha técnica antes de vender.");
+            var cost = Finance.UnitCost(product, ingredients);
+            saleItems.Add(new SaleItem {
+                Id = Guid.NewGuid(), ProductId = product.Id, ProductNameSnapshot = $"{product.Name} · {product.Size}", Quantity = line.Quantity,
+                SalePriceSnapshot = line.Price, UnitCostSnapshot = decimal.Round(cost, 6), VariableFeeSnapshot = decimal.Round(Finance.Fee(line.Price, line.FeePercent, line.FeePerUnit), 6)
+            });
+        }
+        var sale = new Sale { Id = Guid.NewGuid(), SoldOn = input.Date, Channel = Text(input.Channel, 60), PaymentMethod = Text(input.PaymentMethod, 60), Items = saleItems };
         db.Sales.Add(sale); await db.SaveChangesAsync(); await transaction.CommitAsync(); return SaleView(sale);
     });
     [Function("SaleById")]

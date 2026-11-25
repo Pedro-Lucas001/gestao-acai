@@ -1,4 +1,5 @@
 import { localStore } from "./localStore";
+import { previousPeriod } from "../reports";
 import type {
   DashboardSummary,
   Expense,
@@ -93,16 +94,30 @@ export const api = {
       return localStore.load(period);
     }
     const query = `?${new URLSearchParams({ from: period.from, to: period.to })}`;
+    const prev = previousPeriod(period);
+    const prevQuery = `?${new URLSearchParams({ from: prev.from, to: prev.to })}`;
     try {
-      const [summary, ingredients, products, sales, expenses] =
+      const [summary, ingredients, products, sales, expenses, previousSummary] =
         await Promise.all([
           request<DashboardSummary>("dashboard" + query),
           request<Ingredient[]>("ingredients"),
           request<Product[]>("products"),
           request<Sale[]>("sales" + query),
           request<Expense[]>("expenses" + query),
+          prev.from !== period.from || prev.to !== period.to
+            ? request<DashboardSummary>("dashboard" + prevQuery).catch(
+                () => undefined,
+              )
+            : Promise.resolve(undefined),
         ]);
-      return { summary, ingredients, products, sales, expenses };
+      return {
+        summary,
+        previousSummary,
+        ingredients,
+        products,
+        sales,
+        expenses,
+      };
     } catch (error) {
       if (
         !configuredBase &&
