@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import {
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
   Boxes,
+  Calculator,
   CalendarDays,
   Check,
   ChevronRight,
   CircleDollarSign,
   CreditCard,
+  Download,
   FlaskConical,
+  HardDrive,
   LayoutDashboard,
   LoaderCircle,
   Menu,
@@ -22,23 +25,37 @@ import {
   ShieldCheck,
   Trash2,
   TrendingUp,
+  Upload,
   Wallet,
   Waves,
   X,
 } from "lucide-react";
 import { api } from "./api";
+import type { StorageMode } from "./api";
 import { Brand } from "./components/Brand";
 import { Intro } from "./components/Intro";
 import type {
+  Expense,
   Ingredient,
   Period,
   Product,
+  Sale,
   Section,
   Snapshot,
 } from "./api/types";
 import { EditorModal } from "./Forms";
 import type { Editor } from "./Forms";
-import { brl, datePt, monthPeriod, num, today } from "./format";
+import {
+  brl,
+  brlUnit,
+  datePt,
+  monthPeriod,
+  num,
+  pct,
+  rollingPeriod,
+  today,
+} from "./format";
+
 const navigation = [
   { label: "Visão geral", icon: LayoutDashboard },
   { label: "Insumos", icon: FlaskConical },
@@ -47,18 +64,22 @@ const navigation = [
   { label: "Despesas", icon: Wallet },
   { label: "Precificação", icon: CircleDollarSign },
 ] as const;
+
 export default function App() {
   const [intro, setIntro] = useState(true);
   const finishIntro = useCallback(() => setIntro(false), []);
   const [section, setSection] = useState<Section>("Visão geral");
   const [period, setPeriod] = useState<Period>(monthPeriod);
   const [data, setData] = useState<Snapshot>();
+  const [storageMode, setStorageMode] = useState<StorageMode>(api.getMode);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<Editor>();
   const [mobile, setMobile] = useState(false);
   const [toast, setToast] = useState("");
   const version = useRef(0);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
   const load = useCallback(async () => {
     const current = ++version.current;
     setLoading(true);
@@ -66,19 +87,24 @@ export default function App() {
     setData(undefined);
     try {
       const snapshot = await api.load(period);
-      if (version.current === current) setData(snapshot);
+      if (version.current === current) {
+        setData(snapshot);
+        setStorageMode(api.getMode());
+      }
     } catch (e) {
       if (version.current === current) setError((e as Error).message);
     } finally {
       if (version.current === current) setLoading(false);
     }
   }, [period]);
+
   useEffect(() => {
     void load();
     return () => {
       ++version.current;
     };
   }, [load]);
+
   useEffect(() => {
     if (!intro) {
       const frame = requestAnimationFrame(() =>
@@ -87,12 +113,14 @@ export default function App() {
       return () => cancelAnimationFrame(frame);
     }
   }, [intro]);
+
   useEffect(() => {
     if (toast) {
       const timer = window.setTimeout(() => setToast(""), 4500);
       return () => window.clearTimeout(timer);
     }
   }, [toast]);
+
   const closeEditor = useCallback(() => setEditor(undefined), []);
   const saved = () => {
     setEditor(undefined);
@@ -103,7 +131,35 @@ export default function App() {
     setSection(next);
     setMobile(false);
   };
+
+  const handleExportBackup = () => {
+    const json = api.exportLocalBackup();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `netuno-acai-backup-${today()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setToast("Backup exportado com sucesso.");
+  };
+
+  const handleImportBackup = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      api.importLocalBackup(text);
+      setToast("Backup importado com sucesso.");
+      void load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   if (intro) return <Intro onComplete={finishIntro} />;
+
   const create = (target: Section = section) =>
     setEditor({
       section:
@@ -113,6 +169,7 @@ export default function App() {
             ? "Produtos"
             : target,
     });
+
   return (
     <div className="app-shell">
       <a href="#page-title" className="skip-link">
@@ -157,10 +214,44 @@ export default function App() {
             <span>N</span>
             <div>
               <strong>Meu espaço</strong>
-              <small>Organização pessoal</small>
+              <small>
+                {storageMode === "local"
+                  ? "Salvo neste navegador"
+                  : "Organização pessoal"}
+              </small>
             </div>
-            <ShieldCheck size={17} />
+            {storageMode === "local" ? (
+              <HardDrive size={17} aria-label="Armazenamento local" />
+            ) : (
+              <ShieldCheck size={17} />
+            )}
           </div>
+          {storageMode === "local" && (
+            <div className="backup-bar">
+              <button
+                type="button"
+                className="backup-button"
+                onClick={handleExportBackup}
+              >
+                <Download size={13} /> Exportar
+              </button>
+              <button
+                type="button"
+                className="backup-button"
+                onClick={() => importInputRef.current?.click()}
+              >
+                <Upload size={13} /> Importar
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="sr-only"
+                aria-label="Importar backup JSON"
+                onChange={(e) => void handleImportBackup(e)}
+              />
+            </div>
+          )}
         </div>
       </aside>
       {mobile && (
@@ -267,7 +358,9 @@ export default function App() {
               ) : section === "Precificação" ? (
                 <Pricing
                   data={data}
-                  edit={(p) => setEditor({ section: "Produtos", item: p })}
+                  edit={(p, suggestedPrice) =>
+                    setEditor({ section: "Produtos", item: p, suggestedPrice })
+                  }
                   fixed={() => setEditor({ section, fixed: true })}
                 />
               ) : (
@@ -290,7 +383,11 @@ export default function App() {
           <span>
             NETUNO AÇAÍ <i /> Feito para o seu negócio.
           </span>
-          <span>Valores em BRL · Horário de Brasília</span>
+          <span>
+            {storageMode === "local"
+              ? "Modo local (navegador) · Valores em BRL"
+              : "Valores em BRL · Horário de Brasília"}
+          </span>
         </footer>
       </main>
       {editor && data && (
@@ -304,6 +401,7 @@ export default function App() {
     </div>
   );
 }
+
 function PeriodPicker({
   period,
   onChange,
@@ -313,23 +411,31 @@ function PeriodPicker({
 }) {
   const [draft, setDraft] = useState(period);
   const [custom, setCustom] = useState(false);
-  const presets = (days: number) => {
-    const end = today();
-    const start = new Date(end + "T12:00:00Z");
-    start.setUTCDate(start.getUTCDate() - days + 1);
-    onChange({ from: start.toISOString().slice(0, 10), to: end });
-    setCustom(false);
-  };
+
+  useEffect(() => {
+    setDraft(period);
+  }, [period]);
+
   const month = monthPeriod();
+  const last7 = rollingPeriod(7);
+  const last30 = rollingPeriod(30);
+
+  const isSame = (a: Period, b: Period) => a.from === b.from && a.to === b.to;
+  const activePreset = custom
+    ? "custom"
+    : isSame(period, month)
+      ? "month"
+      : isSame(period, last7)
+        ? "7d"
+        : isSame(period, last30)
+          ? "30d"
+          : "custom";
+
   return (
     <div className="period-bar">
       <div className="period-tabs">
         <button
-          className={
-            !custom && period.from === month.from && period.to === month.to
-              ? "selected"
-              : ""
-          }
+          className={activePreset === "month" ? "selected" : ""}
           onClick={() => {
             onChange(month);
             setCustom(false);
@@ -337,10 +443,26 @@ function PeriodPicker({
         >
           Este mês
         </button>
-        <button onClick={() => presets(7)}>7 dias</button>
-        <button onClick={() => presets(30)}>30 dias</button>
         <button
-          className={custom ? "selected" : ""}
+          className={activePreset === "7d" ? "selected" : ""}
+          onClick={() => {
+            onChange(last7);
+            setCustom(false);
+          }}
+        >
+          7 dias
+        </button>
+        <button
+          className={activePreset === "30d" ? "selected" : ""}
+          onClick={() => {
+            onChange(last30);
+            setCustom(false);
+          }}
+        >
+          30 dias
+        </button>
+        <button
+          className={activePreset === "custom" ? "selected" : ""}
           onClick={() => {
             setDraft(period);
             setCustom(!custom);
@@ -354,7 +476,10 @@ function PeriodPicker({
           className="date-form"
           onSubmit={(e) => {
             e.preventDefault();
-            onChange(draft);
+            if (draft.from && draft.to && draft.from <= draft.to) {
+              onChange(draft);
+              setCustom(false);
+            }
           }}
         >
           <label>
@@ -390,6 +515,7 @@ function PeriodPicker({
     </div>
   );
 }
+
 function Metric({
   label,
   value,
@@ -414,6 +540,7 @@ function Metric({
     </article>
   );
 }
+
 function Overview({
   data,
   period,
@@ -426,26 +553,49 @@ function Overview({
   create: (s: Section) => void;
 }) {
   const s = data.summary;
+  const averageTicket = s.salesCount > 0 ? s.revenue / s.salesCount : 0;
+
+  const channelStats = useMemo(() => {
+    const map = new Map<string, { revenue: number; count: number }>();
+    for (const sale of data.sales) {
+      const current = map.get(sale.channel) ?? { revenue: 0, count: 0 };
+      current.revenue += sale.total;
+      current.count += 1;
+      map.set(sale.channel, current);
+    }
+    return Array.from(map.entries())
+      .map(([channel, info]) => ({ channel, ...info }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [data.sales]);
+
   return (
     <>
       <section className="metric-grid">
         <Metric
           label="Faturamento"
           value={brl(s.revenue)}
-          detail={`${num(s.quantity)} garrafas · ${s.salesCount} ${s.salesCount === 1 ? "venda" : "vendas"}`}
+          detail={
+            s.salesCount > 0
+              ? `${num(s.quantity)} garrafas · ticket médio ${brl(averageTicket)}`
+              : `${num(s.quantity)} garrafas · 0 vendas`
+          }
           icon={<CircleDollarSign size={21} />}
           tone="featured"
         />
         <Metric
           label="Contribuição"
           value={brl(s.contribution)}
-          detail="Após CMV e taxas das vendas"
+          detail={
+            s.quantity > 0
+              ? `${brl(s.contribution / s.quantity)} por garrafa vendida`
+              : "Após CMV e taxas das vendas"
+          }
           icon={<ArrowUpRight size={21} />}
         />
         <Metric
           label="Despesas"
           value={brl(s.expenses)}
-          detail="Despesas registradas no período"
+          detail={`${data.expenses.length} ${data.expenses.length === 1 ? "lançamento" : "lançamentos"} no período`}
           icon={<ArrowDownLeft size={21} />}
         />
         <Metric
@@ -532,12 +682,13 @@ function Overview({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.sales.slice(0, 4).map((sale) => (
+                  {data.sales.slice(0, 5).map((sale) => (
                     <tr key={sale.id}>
                       <td>
                         <strong>{sale.productName}</strong>
                         <small>
-                          {sale.channel} · {num(sale.quantity)} garrafas
+                          {sale.channel} · {num(sale.quantity)}{" "}
+                          {sale.quantity === 1 ? "garrafa" : "garrafas"}
                         </small>
                       </td>
                       <td>{datePt(sale.date)}</td>
@@ -581,6 +732,19 @@ function Overview({
               ? "Percentual sobre a receita registrada no período."
               : "A margem será calculada quando houver vendas."}
           </p>
+          {channelStats.length > 0 && (
+            <div className="channel-breakdown">
+              <span className="eyebrow">VENDAS POR CANAL</span>
+              {channelStats.map((item) => (
+                <div className="channel-row" key={item.channel}>
+                  <span>
+                    {item.channel} ({item.count})
+                  </span>
+                  <b>{brl(item.revenue)}</b>
+                </div>
+              ))}
+            </div>
+          )}
           <button
             className="text-button"
             onClick={() => navigate("Precificação")}
@@ -633,6 +797,7 @@ function Overview({
     </>
   );
 }
+
 function RevenueChart({
   daily,
   period,
@@ -656,9 +821,10 @@ function RevenueChart({
       </div>
     );
   // Include days with no sales; aggregate into at most 31 contiguous buckets for long ranges.
-  const count =
+  const rawCount =
     Math.round((Date.parse(period.to) - Date.parse(period.from)) / 86400000) +
     1;
+  const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 1;
   const bucketDays = Math.max(1, Math.ceil(count / 31));
   const buckets: { label: string; value: number }[] = [];
   const values = new Map(daily.map((x) => [x.date, x.revenue]));
@@ -691,7 +857,7 @@ function RevenueChart({
           <div className="chart-column" key={x.label}>
             <div className="chart-bar-space">
               <div
-                className="chart-bar"
+                className={`chart-bar ${i === 0 ? "edge-left" : i === buckets.length - 1 ? "edge-right" : ""}`}
                 tabIndex={0}
                 style={{ height: `${(x.value / max) * 100}%` }}
                 aria-label={`${datePt(x.label)}${bucketDays > 1 ? `, até ${bucketDays} dias` : ""}: ${brl(x.value)}`}
@@ -713,6 +879,7 @@ function RevenueChart({
     </div>
   );
 }
+
 function Empty({
   icon,
   title,
@@ -740,6 +907,7 @@ function Empty({
     </div>
   );
 }
+
 function Records({
   section,
   data,
@@ -750,26 +918,63 @@ function Records({
   section: Section;
   data: Snapshot;
   create: () => void;
-  edit: (item: Ingredient | Product) => void;
+  edit: (item: Ingredient | Product | Expense) => void;
   reload: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const source =
-    section === "Insumos"
-      ? data.ingredients
-      : section === "Produtos"
-        ? data.products
-        : section === "Vendas"
-          ? data.sales
-          : data.expenses;
-  const rows = source.filter((x) =>
-    JSON.stringify(x)
-      .toLocaleLowerCase("pt-BR")
-      .includes(search.toLocaleLowerCase("pt-BR")),
+
+  const ingredientNames = useMemo(
+    () => new Map(data.ingredients.map((i) => [i.id, i.name])),
+    [data.ingredients],
   );
+
+  const query = search.trim().toLocaleLowerCase("pt-BR");
+
+  const rows = useMemo(() => {
+    const match = (fields: string[]) =>
+      !query ||
+      fields.some((f) => f.toLocaleLowerCase("pt-BR").includes(query));
+
+    if (section === "Insumos") {
+      return data.ingredients.filter((x) =>
+        match([x.name, x.unit, brl(x.purchasePrice), num(x.purchaseQuantity)]),
+      );
+    }
+    if (section === "Produtos") {
+      return data.products.filter((x) =>
+        match([
+          x.name,
+          x.size,
+          brl(x.price),
+          ...x.recipe.map((r) => ingredientNames.get(r.ingredientId) ?? ""),
+        ]),
+      );
+    }
+    if (section === "Vendas") {
+      return data.sales.filter((x) =>
+        match([
+          x.productName,
+          x.channel,
+          x.paymentMethod,
+          datePt(x.date),
+          brl(x.total),
+        ]),
+      );
+    }
+    return data.expenses.filter((x) =>
+      match([
+        x.description,
+        x.category,
+        datePt(x.date),
+        x.isFixed ? "Fixa" : "Variável",
+        brl(x.amount),
+      ]),
+    );
+  }, [section, data, query, ingredientNames]);
+
   async function remove(id: string) {
     if (pending !== id) {
       setPending(id);
@@ -783,7 +988,9 @@ function Records({
           ? "ingredients"
           : section === "Produtos"
             ? "products"
-            : "expenses",
+            : section === "Vendas"
+              ? "sales"
+              : "expenses",
         id,
       );
       reload();
@@ -794,16 +1001,24 @@ function Records({
       setPending(undefined);
     }
   }
+
+  const labelOf = (item: Ingredient | Product | Sale | Expense) =>
+    "name" in item
+      ? item.name
+      : "productName" in item
+        ? item.productName
+        : item.description;
+
   const actions = (
-    item: Ingredient | Product | { id: string },
+    item: Ingredient | Product | Sale | Expense,
     canEdit: boolean,
   ) => (
     <div className="row-actions">
       {canEdit && (
         <button
           className="icon-button"
-          aria-label={`Editar ${"name" in item ? item.name : "registro"}`}
-          onClick={() => edit(item as Ingredient | Product)}
+          aria-label={`Editar ${labelOf(item)}`}
+          onClick={() => edit(item as Ingredient | Product | Expense)}
         >
           <Pencil size={16} />
         </button>
@@ -829,7 +1044,7 @@ function Records({
         <button
           className="icon-button"
           disabled={busy}
-          aria-label={`Excluir ${"name" in item ? item.name : "despesa"}`}
+          aria-label={`Excluir ${labelOf(item)}`}
           onClick={() => void remove(item.id)}
         >
           <Trash2 size={16} />
@@ -837,6 +1052,26 @@ function Records({
       )}
     </div>
   );
+
+  const salesTotals = useMemo(() => {
+    if (section !== "Vendas") return null;
+    const list = rows as Sale[];
+    const qty = list.reduce((s, x) => s + x.quantity, 0);
+    const total = list.reduce((s, x) => s + x.total, 0);
+    const contrib = list.reduce((s, x) => s + x.contribution, 0);
+    return { qty, total, contrib };
+  }, [section, rows]);
+
+  const expenseTotals = useMemo(() => {
+    if (section !== "Despesas") return null;
+    const list = rows as Expense[];
+    const total = list.reduce((s, x) => s + x.amount, 0);
+    const fixed = list
+      .filter((x) => x.isFixed)
+      .reduce((s, x) => s + x.amount, 0);
+    return { total, fixed, variable: total - fixed };
+  }, [section, rows]);
+
   return (
     <section className="panel listing-panel">
       <div className="panel-heading">
@@ -867,6 +1102,38 @@ function Records({
           />
         </label>
       </div>
+      {salesTotals && rows.length > 0 && (
+        <div className="summary-strip">
+          <div>
+            <small>Garrafas</small>
+            <strong>{num(salesTotals.qty)}</strong>
+          </div>
+          <div>
+            <small>Faturamento</small>
+            <strong>{brl(salesTotals.total)}</strong>
+          </div>
+          <div>
+            <small>Contribuição</small>
+            <strong>{brl(salesTotals.contrib)}</strong>
+          </div>
+        </div>
+      )}
+      {expenseTotals && rows.length > 0 && (
+        <div className="summary-strip">
+          <div>
+            <small>Total no período</small>
+            <strong>{brl(expenseTotals.total)}</strong>
+          </div>
+          <div>
+            <small>Despesas fixas</small>
+            <strong>{brl(expenseTotals.fixed)}</strong>
+          </div>
+          <div>
+            <small>Despesas variáveis</small>
+            <strong>{brl(expenseTotals.variable)}</strong>
+          </div>
+        </div>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -917,6 +1184,7 @@ function Records({
                           "Qtd.",
                           "Total",
                           "Contribuição",
+                          "Ações",
                         ]
                       : ["Descrição", "Categoria", "Data", "Valor", "Ações"]
                 ).map((x) => (
@@ -937,36 +1205,40 @@ function Records({
                       </td>
                       <td>{brl(x.purchasePrice)}</td>
                       <td>
-                        {num(x.purchasePrice / x.purchaseQuantity)} R$ /{" "}
+                        {brlUnit(x.purchasePrice / x.purchaseQuantity)} /{" "}
                         {x.unit}
                       </td>
                       <td>{actions(x, true)}</td>
                     </tr>
                   ))
                 : section === "Produtos"
-                  ? (rows as Product[]).map((x) => (
-                      <tr key={x.id}>
-                        <td>
-                          <strong>{x.name}</strong>
-                          <small>
-                            {x.size} · {x.recipe.length}{" "}
-                            {x.recipe.length === 1 ? "insumo" : "insumos"}
-                          </small>
-                        </td>
-                        <td>{brl(x.unitCost)}</td>
-                        <td>{brl(x.price)}</td>
-                        <td>
-                          <span
-                            className={`badge ${x.contribution < 0 ? "bad" : ""}`}
-                          >
-                            {brl(x.contribution)}
-                          </span>
-                        </td>
-                        <td>{actions(x, true)}</td>
-                      </tr>
-                    ))
+                  ? (rows as Product[]).map((x) => {
+                      const margin =
+                        x.price > 0 ? (x.contribution / x.price) * 100 : 0;
+                      return (
+                        <tr key={x.id}>
+                          <td>
+                            <strong>{x.name}</strong>
+                            <small>
+                              {x.size} · {x.recipe.length}{" "}
+                              {x.recipe.length === 1 ? "insumo" : "insumos"}
+                            </small>
+                          </td>
+                          <td>{brl(x.unitCost)}</td>
+                          <td>{brl(x.price)}</td>
+                          <td>
+                            <span
+                              className={`badge ${x.contribution <= 0 ? "bad" : ""}`}
+                            >
+                              {brl(x.contribution)} · {pct(margin)}
+                            </span>
+                          </td>
+                          <td>{actions(x, true)}</td>
+                        </tr>
+                      );
+                    })
                   : section === "Vendas"
-                    ? (rows as Snapshot["sales"]).map((x) => (
+                    ? (rows as Sale[]).map((x) => (
                         <tr key={x.id}>
                           <td>
                             <strong>{x.productName}</strong>
@@ -979,9 +1251,10 @@ function Records({
                           <td>{num(x.quantity)}</td>
                           <td className="amount">{brl(x.total)}</td>
                           <td>{brl(x.contribution)}</td>
+                          <td>{actions(x, false)}</td>
                         </tr>
                       ))
-                    : (rows as Snapshot["expenses"]).map((x) => (
+                    : (rows as Expense[]).map((x) => (
                         <tr key={x.id}>
                           <td>
                             <strong>{x.description}</strong>
@@ -990,7 +1263,7 @@ function Records({
                           <td>{x.category}</td>
                           <td>{datePt(x.date)}</td>
                           <td className="amount">{brl(x.amount)}</td>
-                          <td>{actions(x, false)}</td>
+                          <td>{actions(x, true)}</td>
                         </tr>
                       ))}
             </tbody>
@@ -1000,16 +1273,45 @@ function Records({
     </section>
   );
 }
+
 function Pricing({
   data,
   edit,
   fixed,
 }: {
   data: Snapshot;
-  edit: (p: Product) => void;
+  edit: (p: Product, suggestedPrice?: number) => void;
   fixed: () => void;
 }) {
   const s = data.summary;
+  const [simProductId, setSimProductId] = useState(data.products[0]?.id ?? "");
+  const [targetMargin, setTargetMargin] = useState(45);
+
+  const simProduct =
+    data.products.find((p) => p.id === simProductId) ?? data.products[0];
+
+  const simulation = useMemo(() => {
+    if (!simProduct) return null;
+    const denom = 1 - simProduct.feePercent / 100 - targetMargin / 100;
+    if (denom <= 0.01) return { viable: false as const };
+    const suggestedPrice =
+      Math.ceil(((simProduct.unitCost + simProduct.feePerUnit) / denom) * 100) /
+      100;
+    const variableFee =
+      (suggestedPrice * simProduct.feePercent) / 100 + simProduct.feePerUnit;
+    const contribution = suggestedPrice - simProduct.unitCost - variableFee;
+    const breakEven =
+      contribution > 0
+        ? Math.ceil(s.monthlyFixedCosts / contribution)
+        : null;
+    return {
+      viable: true as const,
+      suggestedPrice,
+      contribution,
+      breakEven,
+    };
+  }, [simProduct, targetMargin, s.monthlyFixedCosts]);
+
   return (
     <>
       <div className="pricing-intro">
@@ -1054,33 +1356,37 @@ function Pricing({
                 </tr>
               </thead>
               <tbody>
-                {data.products.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <strong>{p.name}</strong>
-                      <small>{p.size}</small>
-                    </td>
-                    <td>{brl(p.price)}</td>
-                    <td>{brl(p.unitCost)}</td>
-                    <td>{brl(p.variableFee)}</td>
-                    <td>{brl(p.contribution)}</td>
-                    <td>
-                      <span
-                        className={`badge ${p.contribution <= 0 ? "bad" : ""}`}
-                      >
-                        {num(
-                          Number(((p.contribution / p.price) * 100).toFixed(1)),
-                        )}
-                        %
-                      </span>
-                    </td>
-                    <td>
-                      <button className="text-button" onClick={() => edit(p)}>
-                        Ajustar <Pencil size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {data.products.map((p) => {
+                  const margin =
+                    p.price > 0 ? (p.contribution / p.price) * 100 : 0;
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <strong>{p.name}</strong>
+                        <small>{p.size}</small>
+                      </td>
+                      <td>{brl(p.price)}</td>
+                      <td>{brl(p.unitCost)}</td>
+                      <td>{brl(p.variableFee)}</td>
+                      <td>{brl(p.contribution)}</td>
+                      <td>
+                        <span
+                          className={`badge ${p.contribution <= 0 ? "bad" : ""}`}
+                        >
+                          {num(Number(margin.toFixed(1)))}%
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className="text-button"
+                          onClick={() => edit(p)}
+                        >
+                          Ajustar <Pencil size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1092,6 +1398,81 @@ function Pricing({
           />
         )}
       </section>
+      {simProduct && (
+        <section className="panel simulator-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">SIMULADOR DE PREÇO</span>
+              <h2>Encontre o preço ideal para sua margem</h2>
+              <p>
+                Simule quanto cobrar para alcançar a margem desejada sobre cada
+                garrafa.
+              </p>
+            </div>
+            <Calculator size={20} />
+          </div>
+          <div className="simulator-body">
+            <div className="simulator-controls">
+              <label>
+                Produto para simular
+                <select
+                  value={simProduct.id}
+                  onChange={(e) => setSimProductId(e.target.value)}
+                >
+                  {data.products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.size} (atual: {brl(p.price)})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Margem desejada: <strong>{targetMargin}%</strong>
+                <input
+                  type="range"
+                  min={10}
+                  max={80}
+                  step={1}
+                  value={targetMargin}
+                  onChange={(e) => setTargetMargin(Number(e.target.value))}
+                />
+              </label>
+            </div>
+            {simulation?.viable ? (
+              <div className="simulator-result">
+                <div>
+                  <small>Preço sugerido</small>
+                  <strong>{brl(simulation.suggestedPrice)}</strong>
+                </div>
+                <div>
+                  <small>Nova contribuição</small>
+                  <strong>{brl(simulation.contribution)} / un</strong>
+                </div>
+                <div>
+                  <small>Equilíbrio só com este sabor</small>
+                  <strong>
+                    {simulation.breakEven !== null
+                      ? `${num(simulation.breakEven)} garrafas/mês`
+                      : "—"}
+                  </strong>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => edit(simProduct, simulation.suggestedPrice)}
+                >
+                  Usar este preço <ArrowRight size={15} />
+                </button>
+              </div>
+            ) : (
+              <p className="notice">
+                A margem desejada somada à taxa percentual ({simProduct.feePercent}
+                %) ultrapassa 100%. Reduza a margem alvo.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
       <article className="break-even">
         <span>
           <TrendingUp size={25} />

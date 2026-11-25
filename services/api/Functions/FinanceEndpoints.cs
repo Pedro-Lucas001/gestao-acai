@@ -169,7 +169,12 @@ public sealed class FinanceEndpoints(GestaoDbContext db, ILogger<FinanceEndpoint
         db.Sales.Add(sale); await db.SaveChangesAsync(); await transaction.CommitAsync(); return SaleView(sale);
     });
     [Function("SaleById")]
-    public Task<HttpResponseData> SaleById([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "sales/{id:guid}")] HttpRequestData request, Guid id) => Run(request, async () => SaleView(await db.Sales.AsNoTracking().Include(x => x.Items).SingleOrDefaultAsync(x => x.Id == id) ?? throw new DomainError("Venda não encontrada.", 404)));
+    public Task<HttpResponseData> SaleById([HttpTrigger(AuthorizationLevel.Anonymous, "get", "delete", Route = "sales/{id:guid}")] HttpRequestData request, Guid id) => Run(request, async () =>
+    {
+        var row = await db.Sales.Include(x => x.Items).SingleOrDefaultAsync(x => x.Id == id) ?? throw new DomainError("Venda não encontrada.", 404);
+        if (request.Method == "DELETE") { db.Sales.Remove(row); await db.SaveChangesAsync(); return new { id }; }
+        return SaleView(row);
+    });
     [Function("Expenses")]
     public Task<HttpResponseData> Expenses([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = "expenses")] HttpRequestData request) => Run(request, async () =>
     {
@@ -183,10 +188,19 @@ public sealed class FinanceEndpoints(GestaoDbContext db, ILogger<FinanceEndpoint
         db.Expenses.Add(row); await db.SaveChangesAsync(); return new { row.Id };
     });
     [Function("ExpenseById")]
-    public Task<HttpResponseData> ExpenseById([HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "expenses/{id:guid}")] HttpRequestData request, Guid id) => Run(request, async () =>
+    public Task<HttpResponseData> ExpenseById([HttpTrigger(AuthorizationLevel.Anonymous, "put", "delete", Route = "expenses/{id:guid}")] HttpRequestData request, Guid id) => Run(request, async () =>
     {
         var row = await db.Expenses.FindAsync(id) ?? throw new DomainError("Despesa não encontrada.", 404);
-        db.Expenses.Remove(row); await db.SaveChangesAsync(); return new { id };
+        if (request.Method == "DELETE") db.Expenses.Remove(row);
+        else {
+            var input = await Body<ExpenseInput>(request);
+            row.Description = Text(input.Description, 180);
+            row.Category = Text(input.Category, 80);
+            row.OccurredOn = Date(input.Date);
+            row.Amount = Number(input.Amount, true);
+            row.IsFixed = input.IsFixed;
+        }
+        await db.SaveChangesAsync(); return new { id };
     });
     [Function("FixedCosts")]
     public Task<HttpResponseData> FixedCosts([HttpTrigger(AuthorizationLevel.Anonymous, "get", "put", Route = "fixed-costs")] HttpRequestData request) => Run(request, async () =>

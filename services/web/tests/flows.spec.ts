@@ -229,3 +229,104 @@ test("reduced motion opens the dashboard directly", async ({ page }) => {
   );
   await expect(page.getByLabel("Senha", { exact: true })).toHaveCount(0);
 });
+
+test("static host 404 automatically enables browser local mode with full persistence", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/**", (route) =>
+    new URL(route.request().url()).pathname.startsWith("/api/")
+      ? route.fulfill({ status: 404, body: "Not Found" })
+      : route.continue(),
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Seu negócio, em perspectiva." }),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // Verify 7 dias preset highlights correctly
+  const sevenDays = page.getByRole("button", { name: "7 dias" });
+  await sevenDays.click();
+  await expect(sevenDays).toHaveClass(/selected/);
+
+  async function navigate(name: string) {
+    if (info.project.name === "mobile")
+      await page.getByRole("button", { name: "Abrir menu" }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name, exact: true })
+      .click();
+  }
+
+  // Create ingredient
+  await navigate("Insumos");
+  await page.getByRole("button", { name: "Novo insumo" }).click();
+  await page.getByLabel("Nome do insumo").fill("Polpa especial");
+  await page.getByLabel("Unidade base").selectOption("g");
+  await page.getByLabel("Quantidade comprada").fill("1000");
+  await page.getByLabel("Valor total da compra").fill("25");
+  await expect(page.locator(".live-preview")).toContainText("0,025");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Polpa especial")).toBeVisible();
+
+  // Create product
+  await navigate("Produtos");
+  await page.getByRole("button", { name: "Novo produto" }).click();
+  await page.getByLabel("Nome / sabor").fill("Açaí Puro");
+  await page.getByLabel("Tamanho", { exact: true }).fill("500 ml");
+  await page.getByLabel("Preço de venda").fill("18");
+  await page
+    .getByRole("dialog")
+    .getByRole("combobox", { name: "Insumo", exact: true })
+    .selectOption({ index: 1 });
+  await page.getByLabel("Quantidade do insumo 1").fill("400");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Açaí Puro")).toBeVisible();
+
+  // Register sale & verify persistence after reload
+  await navigate("Vendas");
+  await page
+    .getByRole("button", { name: "Registrar venda", exact: true })
+    .click();
+  await page.getByLabel("Quantidade de garrafas").fill("2");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Açaí Puro · 500 ml")).toBeVisible();
+
+  // Delete sale with confirmation
+  await page.getByRole("button", { name: /Excluir Açaí Puro/ }).click();
+  await page.getByRole("button", { name: "Confirmar exclusão" }).click();
+  await expect(page.getByText("Tudo começa com o primeiro registro")).toBeVisible();
+
+  // Create & edit expense
+  await navigate("Despesas");
+  await page.getByRole("button", { name: "Nova despesa" }).click();
+  await page.getByLabel("Descrição").fill("Energia");
+  await page.getByLabel("Categoria").fill("Contas");
+  await page.getByLabel("Valor (R$)").fill("150");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Energia")).toBeVisible();
+
+  await page.getByRole("button", { name: "Editar Energia" }).click();
+  await page.getByLabel("Descrição").fill("Energia elétrica");
+  await page.getByRole("button", { name: "Salvar registro" }).click();
+  await expect(page.getByText("Energia elétrica")).toBeVisible();
+
+  // Pricing simulator
+  await navigate("Precificação");
+  await expect(page.getByText("Encontre o preço ideal para sua margem")).toBeVisible();
+
+  // Reload and confirm local persistence
+  await page.reload();
+  await navigate("Despesas");
+  await expect(page.getByText("Energia elétrica")).toBeVisible();
+
+  // Verify no horizontal overflow
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+});
+

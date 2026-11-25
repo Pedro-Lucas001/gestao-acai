@@ -78,7 +78,9 @@ public sealed class EndpointTests
             Assert.Equal(10m, products[0].GetProperty("unitCost").GetDecimal());
             // Reconcile the same recipe without violating the ingredient/product unique index.
             await Call("PUT", "products/" + productId, new { name = "Novo nome", size = "300 ml", price = 12m, feePercent = 6m, feePerUnit = .5m, recipe }, (a, r) => a.ProductById(r, productId));
-            await Call("POST", "expenses", new { description = "Energia", category = "Contas", date = "2026-11-23", amount = 3, isFixed = true }, (a, r) => a.Expenses(r));
+            var expense = await Call("POST", "expenses", new { description = "Energia", category = "Contas", date = "2026-11-23", amount = 5, isFixed = false }, (a, r) => a.Expenses(r));
+            var expenseId = expense.GetProperty("id").GetGuid();
+            await Call("PUT", "expenses/" + expenseId, new { description = "Energia elétrica", category = "Contas", date = "2026-11-23", amount = 3, isFixed = true }, (a, r) => a.ExpenseById(r, expenseId));
             await Call("PUT", "fixed-costs", new { monthlyAmount = 100 }, (a, r) => a.FixedCosts(r));
             var dashboard = await Call("GET", "dashboard?from=2026-11-01&to=2026-11-30", null, (a, r) => a.Dashboard(r));
             Assert.Equal(20m, dashboard.GetProperty("revenue").GetDecimal());
@@ -93,6 +95,10 @@ public sealed class EndpointTests
             await Call("GET", "sales?from=invalid", null, (a, r) => a.Sales(r), HttpStatusCode.BadRequest);
             await Call("DELETE", "ingredients/" + ingredientId, null, (a, r) => a.IngredientById(r, ingredientId), HttpStatusCode.Conflict);
             await Call("DELETE", "products/" + productId, null, (a, r) => a.ProductById(r, productId), HttpStatusCode.Conflict);
+            var saleId = sale.GetProperty("id").GetGuid();
+            await Call("DELETE", "sales/" + saleId, null, (a, r) => a.SaleById(r, saleId));
+            var afterDelete = await Call("GET", "sales?from=2026-11-01&to=2026-11-30", null, (a, r) => a.Sales(r));
+            Assert.Equal(0, afterDelete.GetArrayLength());
         }
         finally { await database.Database.EnsureDeletedAsync(); }
     }
