@@ -18,6 +18,7 @@ export type StorageMode = "api" | "local";
 
 let storageMode: StorageMode =
   env.VITE_STORAGE_MODE === "local" ? "local" : "api";
+let extrasSupported = false;
 
 class ApiHttpError extends Error {
   status: number;
@@ -141,5 +142,64 @@ export const api = {
   },
   importLocalBackup(raw: string): void {
     localStore.importBackup(raw);
+  },
+  hasLocalData(): boolean {
+    return localStore.hasLocalData();
+  },
+  async loadExtrasFromServer(): Promise<{
+    stock: Record<string, { currentStock: number; minStock: number }>;
+    goals: { revenueGoal: number; unitsGoal: number };
+    recurringExpenses: {
+      id: string;
+      description: string;
+      category: string;
+      amount: number;
+      isFixed: boolean;
+    }[];
+  } | null> {
+    if (storageMode !== "api") return null;
+    try {
+      const res = await fetch(`${base}/extras`);
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => null);
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        typeof data.stock !== "object"
+      ) {
+        return null;
+      }
+      extrasSupported = true;
+      return {
+        stock: data.stock && !Array.isArray(data.stock) ? data.stock : {},
+        goals: {
+          revenueGoal: Number(data.goals?.revenueGoal) || 0,
+          unitsGoal: Number(data.goals?.unitsGoal) || 0,
+        },
+        recurringExpenses: Array.isArray(data.recurringExpenses)
+          ? data.recurringExpenses
+          : [],
+      };
+    } catch {
+      return null;
+    }
+  },
+  async saveExtrasToServer(payload: unknown): Promise<void> {
+    if (storageMode !== "api" || !extrasSupported) return;
+    try {
+      await fetch(`${base}/extras`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Non-blocking sync when running against local .NET API without /extras.
+    }
+  },
+  async syncLocalToCloud(): Promise<void> {
+    const raw = JSON.parse(localStore.exportBackup());
+    await request("sync-local", "POST", raw);
+    localStore.clearLocalData();
   },
 };

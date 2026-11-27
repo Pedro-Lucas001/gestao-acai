@@ -12,6 +12,7 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
+  Cloud,
   Copy,
   CreditCard,
   Download,
@@ -55,6 +56,7 @@ import type {
 import {
   loadExtras,
   removeRecurringExpense,
+  saveExtras,
 } from "./extras";
 import type { RecurringExpense, WorkspaceExtras } from "./extras";
 import { EditorModal } from "./Forms";
@@ -96,6 +98,13 @@ export default function App() {
   const version = useRef(0);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  const [syncingCloud, setSyncingCloud] = useState(false);
+
+  const syncExtras = useCallback((next: WorkspaceExtras) => {
+    setExtras(next);
+    void api.saveExtrasToServer(next);
+  }, []);
+
   const load = useCallback(async () => {
     const current = ++version.current;
     setLoading(true);
@@ -103,9 +112,17 @@ export default function App() {
     setData(undefined);
     try {
       const snapshot = await api.load(period);
+      const mode = api.getMode();
       if (version.current === current) {
         setData(snapshot);
-        setStorageMode(api.getMode());
+        setStorageMode(mode);
+        if (mode === "api") {
+          void api.loadExtrasFromServer().then((serverExtras) => {
+            if (serverExtras && version.current === current) {
+              setExtras(saveExtras(serverExtras));
+            }
+          });
+        }
       }
     } catch (e) {
       if (version.current === current) setError((e as Error).message);
@@ -113,6 +130,20 @@ export default function App() {
       if (version.current === current) setLoading(false);
     }
   }, [period]);
+
+  const handleSyncLocalToCloud = async () => {
+    setSyncingCloud(true);
+    setError("");
+    try {
+      await api.syncLocalToCloud();
+      setToast("Dados locais enviados para o banco na nuvem!");
+      void load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSyncingCloud(false);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -251,13 +282,13 @@ export default function App() {
               <small>
                 {storageMode === "local"
                   ? "Salvo neste navegador"
-                  : "Organização pessoal"}
+                  : "Sincronizado na nuvem"}
               </small>
             </div>
             {storageMode === "local" ? (
               <HardDrive size={17} aria-label="Armazenamento local" />
             ) : (
-              <ShieldCheck size={17} />
+              <Cloud size={17} aria-label="Banco na nuvem conectado" />
             )}
           </div>
           {storageMode === "local" && (
@@ -393,6 +424,31 @@ export default function App() {
               <span>Carregando os dados do seu negócio…</span>
             </div>
           )}
+          {data &&
+            !loading &&
+            storageMode === "api" &&
+            api.hasLocalData() &&
+            !data.ingredients.length &&
+            !data.products.length &&
+            !data.sales.length &&
+            !data.expenses.length && (
+              <div className="cloud-sync-banner" role="status">
+                <Cloud size={18} />
+                <div>
+                  <strong>Banco na nuvem conectado!</strong> Encontramos
+                  registros salvos anteriormente neste aparelho. Deseja enviar
+                  tudo para o banco na nuvem?
+                </div>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={syncingCloud}
+                  onClick={() => void handleSyncLocalToCloud()}
+                >
+                  {syncingCloud ? "Enviando…" : "Enviar para a nuvem"}
+                </button>
+              </div>
+            )}
           {data && !loading && (
             <>
               {section === "Visão geral" ? (
@@ -431,7 +487,7 @@ export default function App() {
                   }
                   launchRecurring={handleLaunchRecurring}
                   removeRecurring={(id) =>
-                    setExtras(removeRecurringExpense(id))
+                    syncExtras(removeRecurringExpense(id))
                   }
                   reload={() => {
                     setToast("Registro excluído.");
@@ -449,7 +505,7 @@ export default function App() {
           <span>
             {storageMode === "local"
               ? "Modo local (navegador) · Valores em BRL"
-              : "Valores em BRL · Horário de Brasília"}
+              : "Banco na nuvem · Valores em BRL · Horário de Brasília"}
           </span>
         </footer>
       </main>
@@ -458,7 +514,7 @@ export default function App() {
           editor={editor}
           data={data}
           extras={extras}
-          onExtrasChanged={setExtras}
+          onExtrasChanged={syncExtras}
           onClose={closeEditor}
           onSaved={saved}
         />
