@@ -556,6 +556,21 @@ export const localStore = {
     throw new Error("Operação não suportada.");
   },
 
+  hasLocalData(): boolean {
+    const db = readDb();
+    return (
+      db.ingredients.length > 0 ||
+      db.products.length > 0 ||
+      db.sales.length > 0 ||
+      db.expenses.length > 0 ||
+      db.monthlyFixedCosts > 0
+    );
+  },
+
+  clearLocalData(): void {
+    window.localStorage.removeItem(STORAGE_KEY);
+  },
+
   exportBackup(): string {
     return JSON.stringify(
       { ...readDb(), extras: loadExtras() },

@@ -2309,5 +2309,24 @@ tr:hover td {
     box-shadow: none !important;
   }
 }
+.cloud-sync-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  background: #edf9fa;
+  border: 1px solid #bce4e7;
+  color: #075b61;
+  font-size: 12px;
+  line-height: 1.5;
+  flex-wrap: wrap;
+}
+.cloud-sync-banner > div {
+  flex: 1;
+  min-width: 220px;
+}
+
 
 

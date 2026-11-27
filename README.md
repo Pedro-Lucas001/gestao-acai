@@ -16,6 +16,15 @@ Organizador financeiro de uso pessoal, com identidade visual da Netuno Açaí: r
 
 A interface usa a API real quando disponível e não possui dados fictícios nem preenchimento automático de vendas. Emissão fiscal e contas a receber continuam fora deste escopo.
 
+## Banco de Dados na Nuvem (Sincronizar Celular + PC na Vercel)
+
+Para salvar todos os registros na nuvem (insumos, estoque, produtos, vendas, despesas, metas e modelos recorrentes) e acessar os mesmos dados no celular e no computador:
+
+1. No painel da **Vercel**, abra o projeto `gestao-acai` e clique na aba **Storage**.
+2. Clique em **Create Database** → escolha **Neon (Serverless Postgres)** (plano gratuito) e conecte ao projeto. A Vercel criará automaticamente a variável `DATABASE_URL`.
+3. Faça um **Redeploy** na Vercel (ou um novo push/merge na `main`). A API em `services/web/api/[...route].mjs` cria automaticamente todas as tabelas no PostgreSQL na primeira requisição — sem precisar rodar scripts manuais.
+4. Se você já tinha registros salvos localmente no navegador antes de conectar o banco, aparecerá um botão **Enviar para a nuvem** no painel para migrar tudo em 1 clique.
+
 ## Começar pelo VS Code (Windows)
 
 Abra **a pasta raiz `gestao-acai`** no VS Code. Instale [Node.js 22 ou superior](https://nodejs.org/pt/download) e [Docker Desktop](https://www.docker.com/products/docker-desktop/), mantenha o Docker aberto em modo de contêineres Linux e abra um novo terminal.
