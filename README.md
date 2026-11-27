@@ -5,16 +5,16 @@ Organizador financeiro de uso pessoal, com identidade visual da Netuno Açaí: r
 ## Funcionalidades
 
 - Abertura animada com a logo e acesso direto ao painel, sem usuário ou senha. A animação pode ser pulada e respeita a preferência por movimento reduzido.
-- Insumos em g, ml ou unidade, com quantidade/preço de compra, cálculo de custo unitário em tempo real, edição e exclusão com proteção de vínculos.
-- Produtos com tamanho, ficha técnica por garrafa, preço, taxas padrão e prévia imediata de CMV, contribuição e margem. Custos recalculados a partir dos insumos vigentes.
-- Vendas com preço e taxas editáveis por operação, prévia ao vivo antes de salvar e exclusão confirmada. Quantidade, nome, preço, CMV e taxa unitária ficam preservados no histórico.
-- Despesas fixas/variáveis por data e categoria, com edição, resumo do período e exclusão confirmada.
-- Dashboard, gráfico diário, divisão por canal de venda, busca por campos reais, filtros por período e comparação de rentabilidade dos produtos.
-- Custos fixos mensais previstos, simulador interativo de preço por margem desejada e ponto de equilíbrio baseado na contribuição média das vendas do período.
-- Modo local automático no navegador quando publicado como site estático (como Vercel sem backend configurado), com exportação e importação de backup JSON. Com a API/PostgreSQL ativos localmente, os dados usam o banco real e falhas de servidor continuam sendo exibidas normalmente.
-- Interface responsiva em pt-BR/BRL, estados de carregamento/erro e formulários que preservam o preenchimento se a gravação falhar.
+- **PWA instalável** no celular e computador, com suporte offline e ícone da Netuno Açaí.
+- **Insumos** em g, ml ou unidade, com cálculo de custo unitário em tempo real, controle leve de estoque com alerta de reposição e baixa automática a cada venda, edição, exportação CSV e exclusão com proteção de vínculos.
+- **Produtos** com tamanho, ficha técnica por garrafa, duplicação rápida de receitas, prévia ao vivo de CMV, contribuição e margem, e exportação CSV.
+- **Vendas** com suporte a múltiplos sabores no mesmo pedido, atalhos de **Venda rápida (1 toque)**, filtros rápidos por canal e forma de pagamento, prévia ao vivo antes de salvar, exportação CSV e exclusão confirmada.
+- **Despesas** fixas/variáveis por data e categoria, com edição, **modelos recorrentes (1 clique por mês)**, filtros rápidos, resumo do período, exportação CSV e exclusão confirmada.
+- **Visão geral** com comparativo percentual frente ao período anterior, metas mensais de faturamento e garrafas, gráfico diário, divisão por canal de venda, ranking de sabores mais lucrativos e relatório pronto para impressão/PDF.
+- **Precificação** com custos fixos mensais previstos, simulador interativo de preço por margem desejada e ponto de equilíbrio baseado na contribuição média das vendas do período.
+- **Modo local automático** no navegador quando publicado como site estático (como Vercel sem backend configurado), com exportação e importação completa de backup JSON (incluindo estoque, metas e modelos recorrentes). Com a API/PostgreSQL ativos localmente, os dados usam o banco real e falhas de servidor continuam sendo exibidas normalmente.
 
-A interface usa a API real quando disponível e não possui dados fictícios nem preenchimento automático de vendas. Estoque, produção, validade, contas a receber e emissão fiscal continuam fora deste MVP.
+A interface usa a API real quando disponível e não possui dados fictícios nem preenchimento automático de vendas. Emissão fiscal e contas a receber continuam fora deste escopo.
 
 ## Começar pelo VS Code (Windows)
 

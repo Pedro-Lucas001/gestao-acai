@@ -66,6 +66,7 @@ export interface Expense {
 }
 export interface Snapshot {
   summary: DashboardSummary;
+  previousSummary?: DashboardSummary;
   ingredients: Ingredient[];
   products: Product[];
   sales: Sale[];

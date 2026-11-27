@@ -1,34 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
+  Award,
   Boxes,
   Calculator,
   CalendarDays,
   Check,
   ChevronRight,
   CircleDollarSign,
+  Copy,
   CreditCard,
   Download,
+  FileSpreadsheet,
   FlaskConical,
   HardDrive,
   LayoutDashboard,
   LoaderCircle,
   Menu,
+  Package,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
+  Repeat,
   Search,
   Settings2,
   ShieldCheck,
+  Target,
   Trash2,
   TrendingUp,
   Upload,
   Wallet,
   Waves,
   X,
+  Zap,
 } from "lucide-react";
 import { api } from "./api";
 import type { StorageMode } from "./api";
@@ -43,6 +52,11 @@ import type {
   Section,
   Snapshot,
 } from "./api/types";
+import {
+  loadExtras,
+  removeRecurringExpense,
+} from "./extras";
+import type { RecurringExpense, WorkspaceExtras } from "./extras";
 import { EditorModal } from "./Forms";
 import type { Editor } from "./Forms";
 import {
@@ -55,6 +69,7 @@ import {
   rollingPeriod,
   today,
 } from "./format";
+import { deltaPercent, exportCsv } from "./reports";
 
 const navigation = [
   { label: "Visão geral", icon: LayoutDashboard },
@@ -71,6 +86,7 @@ export default function App() {
   const [section, setSection] = useState<Section>("Visão geral");
   const [period, setPeriod] = useState<Period>(monthPeriod);
   const [data, setData] = useState<Snapshot>();
+  const [extras, setExtras] = useState<WorkspaceExtras>(loadExtras);
   const [storageMode, setStorageMode] = useState<StorageMode>(api.getMode);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -122,9 +138,9 @@ export default function App() {
   }, [toast]);
 
   const closeEditor = useCallback(() => setEditor(undefined), []);
-  const saved = () => {
+  const saved = (message?: string) => {
     setEditor(undefined);
-    setToast("Registro salvo com sucesso.");
+    setToast(message ?? "Registro salvo com sucesso.");
     void load();
   };
   const navigate = (next: Section) => {
@@ -151,7 +167,24 @@ export default function App() {
     try {
       const text = await file.text();
       api.importLocalBackup(text);
+      setExtras(loadExtras());
       setToast("Backup importado com sucesso.");
+      void load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleLaunchRecurring = async (template: RecurringExpense) => {
+    try {
+      await api.save("expenses", {
+        description: template.description,
+        category: template.category,
+        date: today(),
+        amount: template.amount,
+        isFixed: template.isFixed,
+      });
+      setToast(`Despesa "${template.description}" lançada para hoje.`);
       void load();
     } catch (err) {
       setError((err as Error).message);
@@ -160,7 +193,7 @@ export default function App() {
 
   if (intro) return <Intro onComplete={finishIntro} />;
 
-  const create = (target: Section = section) =>
+  const create = (target: Section = section, presetProductId?: string) =>
     setEditor({
       section:
         target === "Visão geral"
@@ -168,6 +201,7 @@ export default function App() {
           : target === "Precificação"
             ? "Produtos"
             : target,
+      presetProductId,
     });
 
   return (
@@ -276,15 +310,28 @@ export default function App() {
               <b>{section}</b>
             </span>
           </div>
-          <button
-            className="secondary-button refresh"
-            onClick={() => void load()}
-            disabled={loading}
-            aria-label="Atualizar dados"
-          >
-            <RefreshCw size={16} className={loading ? "spin" : ""} />
-            <span>Atualizar</span>
-          </button>
+          <div className="topbar-actions">
+            {data && (
+              <button
+                type="button"
+                className="secondary-button refresh print-btn"
+                onClick={() => window.print()}
+                aria-label="Imprimir relatório"
+              >
+                <Printer size={15} />
+                <span>Relatório</span>
+              </button>
+            )}
+            <button
+              className="secondary-button refresh"
+              onClick={() => void load()}
+              disabled={loading}
+              aria-label="Atualizar dados"
+            >
+              <RefreshCw size={16} className={loading ? "spin" : ""} />
+              <span>Atualizar</span>
+            </button>
+          </div>
         </header>
         <div className="page-wrap">
           <section className="page-heading">
@@ -351,9 +398,11 @@ export default function App() {
               {section === "Visão geral" ? (
                 <Overview
                   data={data}
+                  extras={extras}
                   period={period}
                   navigate={navigate}
                   create={create}
+                  openGoals={() => setEditor({ section, goals: true })}
                 />
               ) : section === "Precificação" ? (
                 <Pricing
@@ -367,9 +416,23 @@ export default function App() {
                 <Records
                   key={section}
                   data={data}
+                  extras={extras}
+                  period={period}
                   section={section}
-                  create={() => create()}
+                  create={(presetProductId) =>
+                    create(section, presetProductId)
+                  }
                   edit={(item) => setEditor({ section, item })}
+                  duplicateProduct={(p) =>
+                    setEditor({ section: "Produtos", duplicate: p })
+                  }
+                  openStock={(ing) =>
+                    setEditor({ section: "Insumos", stockItem: ing })
+                  }
+                  launchRecurring={handleLaunchRecurring}
+                  removeRecurring={(id) =>
+                    setExtras(removeRecurringExpense(id))
+                  }
                   reload={() => {
                     setToast("Registro excluído.");
                     void load();
@@ -394,6 +457,8 @@ export default function App() {
         <EditorModal
           editor={editor}
           data={data}
+          extras={extras}
+          onExtrasChanged={setExtras}
           onClose={closeEditor}
           onSaved={saved}
         />
@@ -522,13 +587,19 @@ function Metric({
   detail,
   icon,
   tone = "",
+  delta = null,
+  invertDelta = false,
 }: {
   label: string;
   value: string;
   detail: string;
   icon: ReactNode;
   tone?: string;
+  delta?: number | null;
+  invertDelta?: boolean;
 }) {
+  const showDelta = delta !== null && Math.abs(delta) >= 0.1;
+  const good = showDelta ? (invertDelta ? delta < 0 : delta > 0) : false;
   return (
     <article className={`metric-card ${tone}`}>
       <div className="metric-top">
@@ -536,24 +607,49 @@ function Metric({
         {icon}
       </div>
       <strong>{value}</strong>
-      <small>{detail}</small>
+      <div className="metric-foot">
+        <small>{detail}</small>
+        {showDelta && (
+          <span
+            className={`delta-pill ${good ? "up" : "down"}`}
+            title="Comparado ao período anterior"
+          >
+            {delta > 0 ? "+" : ""}
+            {pct(delta)}
+          </span>
+        )}
+      </div>
     </article>
   );
 }
 
 function Overview({
   data,
+  extras,
   period,
   navigate,
   create,
+  openGoals,
 }: {
   data: Snapshot;
+  extras: WorkspaceExtras;
   period: Period;
   navigate: (s: Section) => void;
-  create: (s: Section) => void;
+  create: (s: Section, presetProductId?: string) => void;
+  openGoals: () => void;
 }) {
   const s = data.summary;
+  const prev = data.previousSummary;
   const averageTicket = s.salesCount > 0 ? s.revenue / s.salesCount : 0;
+
+  const lowStockItems = useMemo(
+    () =>
+      data.ingredients.filter((ing) => {
+        const entry = extras.stock[ing.id];
+        return entry && entry.currentStock <= entry.minStock;
+      }),
+    [data.ingredients, extras.stock],
+  );
 
   const channelStats = useMemo(() => {
     const map = new Map<string, { revenue: number; count: number }>();
@@ -568,8 +664,89 @@ function Overview({
       .sort((a, b) => b.revenue - a.revenue);
   }, [data.sales]);
 
+  const productRanking = useMemo(() => {
+    const map = new Map<
+      string,
+      { name: string; quantity: number; revenue: number; contribution: number }
+    >();
+    for (const sale of data.sales) {
+      const key = sale.productName;
+      const cur = map.get(key) ?? {
+        name: key,
+        quantity: 0,
+        revenue: 0,
+        contribution: 0,
+      };
+      cur.quantity += sale.quantity;
+      cur.revenue += sale.total;
+      cur.contribution += sale.contribution;
+      map.set(key, cur);
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.contribution - a.contribution)
+      .slice(0, 5);
+  }, [data.sales]);
+
+  const revProgress =
+    extras.goals.revenueGoal > 0
+      ? Math.min(100, (s.revenue / extras.goals.revenueGoal) * 100)
+      : null;
+  const unitsProgress =
+    extras.goals.unitsGoal > 0
+      ? Math.min(100, (s.quantity / extras.goals.unitsGoal) * 100)
+      : null;
+  const breakEvenProgress =
+    s.breakEvenUnits !== null && s.breakEvenUnits > 0
+      ? Math.min(100, (s.quantity / s.breakEvenUnits) * 100)
+      : null;
+
   return (
     <>
+      {lowStockItems.length > 0 && (
+        <div className="stock-alert" role="status">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Alerta de reposição de estoque:</strong>{" "}
+            {lowStockItems
+              .map((ing) => {
+                const st = extras.stock[ing.id];
+                return `${ing.name} (${num(st.currentStock)} ${ing.unit})`;
+              })
+              .join(", ")}
+            .
+          </div>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => navigate("Insumos")}
+          >
+            Repor <ArrowRight size={14} />
+          </button>
+        </div>
+      )}
+      {data.products.length > 0 && (
+        <div className="quick-sale-strip">
+          <span className="quick-sale-label">
+            <Zap size={14} /> Venda rápida
+          </span>
+          <div className="quick-sale-buttons">
+            {data.products.slice(0, 4).map((p) => (
+              <button
+                type="button"
+                key={p.id}
+                className="quick-sale-chip"
+                onClick={() => create("Vendas", p.id)}
+              >
+                <Plus size={13} />
+                <span>
+                  {p.name} · {p.size}
+                </span>
+                <b>{brl(p.price)}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <section className="metric-grid">
         <Metric
           label="Faturamento"
@@ -581,6 +758,7 @@ function Overview({
           }
           icon={<CircleDollarSign size={21} />}
           tone="featured"
+          delta={prev ? deltaPercent(s.revenue, prev.revenue) : null}
         />
         <Metric
           label="Contribuição"
@@ -591,12 +769,15 @@ function Overview({
               : "Após CMV e taxas das vendas"
           }
           icon={<ArrowUpRight size={21} />}
+          delta={prev ? deltaPercent(s.contribution, prev.contribution) : null}
         />
         <Metric
           label="Despesas"
           value={brl(s.expenses)}
           detail={`${data.expenses.length} ${data.expenses.length === 1 ? "lançamento" : "lançamentos"} no período`}
           icon={<ArrowDownLeft size={21} />}
+          delta={prev ? deltaPercent(s.expenses, prev.expenses) : null}
+          invertDelta
         />
         <Metric
           label="Resultado estimado"
@@ -604,7 +785,60 @@ function Overview({
           detail="Contribuição menos despesas"
           icon={<TrendingUp size={21} />}
           tone={s.netResult < 0 ? "negative" : "result"}
+          delta={prev ? deltaPercent(s.netResult, prev.netResult) : null}
         />
+      </section>
+      <section className="panel goals-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">METAS E EQUILÍBRIO</span>
+            <h2>Progresso do período</h2>
+          </div>
+          <button type="button" className="text-button" onClick={openGoals}>
+            <Target size={15} /> Definir metas
+          </button>
+        </div>
+        <div className="goals-grid">
+          <div className="goal-item">
+            <div className="goal-top">
+              <span>Ponto de equilíbrio</span>
+              <b>
+                {s.breakEvenUnits !== null && s.breakEvenUnits > 0
+                  ? `${num(s.quantity)} / ${num(s.breakEvenUnits)} garrafas`
+                  : "Sem projeção ativa"}
+              </b>
+            </div>
+            <div className="margin-track">
+              <span style={{ width: `${breakEvenProgress ?? 0}%` }} />
+            </div>
+          </div>
+          <div className="goal-item">
+            <div className="goal-top">
+              <span>Meta de faturamento</span>
+              <b>
+                {extras.goals.revenueGoal > 0
+                  ? `${brl(s.revenue)} / ${brl(extras.goals.revenueGoal)}`
+                  : "Não definida"}
+              </b>
+            </div>
+            <div className="margin-track">
+              <span style={{ width: `${revProgress ?? 0}%` }} />
+            </div>
+          </div>
+          <div className="goal-item">
+            <div className="goal-top">
+              <span>Meta de garrafas</span>
+              <b>
+                {extras.goals.unitsGoal > 0
+                  ? `${num(s.quantity)} / ${num(extras.goals.unitsGoal)} un`
+                  : "Não definida"}
+              </b>
+            </div>
+            <div className="margin-track">
+              <span style={{ width: `${unitsProgress ?? 0}%` }} />
+            </div>
+          </div>
+        </div>
       </section>
       <section className="content-grid">
         <article className="panel">
@@ -753,6 +987,47 @@ function Overview({
           </button>
         </article>
       </section>
+      {productRanking.length > 0 && (
+        <section className="panel ranking-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">MAIS LUCRATIVOS DO PERÍODO</span>
+              <h2>Ranking de sabores</h2>
+              <p>Ordenado pela contribuição gerada nas vendas filtradas</p>
+            </div>
+            <Award size={20} />
+          </div>
+          <div className="ranking-list">
+            {productRanking.map((item, idx) => {
+              const maxContrib = Math.max(
+                productRanking[0]?.contribution ?? 1,
+                1,
+              );
+              return (
+                <div className="ranking-row" key={item.name}>
+                  <span className="ranking-pos">#{idx + 1}</span>
+                  <div className="ranking-info">
+                    <div className="ranking-top">
+                      <strong>{item.name}</strong>
+                      <span>
+                        {num(item.quantity)} un · {brl(item.revenue)} ·{" "}
+                        <b>{brl(item.contribution)} contrib.</b>
+                      </span>
+                    </div>
+                    <div className="margin-track">
+                      <span
+                        style={{
+                          width: `${Math.max(4, Math.min(100, (item.contribution / maxContrib) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="quick-grid">
         {[
           {
@@ -820,7 +1095,6 @@ function RevenueChart({
         </div>
       </div>
     );
-  // Include days with no sales; aggregate into at most 31 contiguous buckets for long ranges.
   const rawCount =
     Math.round((Date.parse(period.to) - Date.parse(period.from)) / 86400000) +
     1;
@@ -911,17 +1185,30 @@ function Empty({
 function Records({
   section,
   data,
+  extras,
+  period,
   create,
   edit,
+  duplicateProduct,
+  openStock,
+  launchRecurring,
+  removeRecurring,
   reload,
 }: {
   section: Section;
   data: Snapshot;
-  create: () => void;
+  extras: WorkspaceExtras;
+  period: Period;
+  create: (presetProductId?: string) => void;
   edit: (item: Ingredient | Product | Expense) => void;
+  duplicateProduct: (p: Product) => void;
+  openStock: (ing: Ingredient) => void;
+  launchRecurring: (t: RecurringExpense) => Promise<void>;
+  removeRecurring: (id: string) => void;
   reload: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [chipFilter, setChipFilter] = useState("ALL");
   const [pending, setPending] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -930,6 +1217,32 @@ function Records({
     () => new Map(data.ingredients.map((i) => [i.id, i.name])),
     [data.ingredients],
   );
+
+  const filterChips = useMemo(() => {
+    if (section === "Vendas") {
+      const channels = Array.from(new Set(data.sales.map((s) => s.channel)));
+      const payments = Array.from(
+        new Set(data.sales.map((s) => s.paymentMethod)),
+      );
+      return [
+        { id: "ALL", label: "Todas" },
+        ...channels.map((c) => ({ id: `ch:${c}`, label: c })),
+        ...payments.map((p) => ({ id: `pm:${p}`, label: p })),
+      ];
+    }
+    if (section === "Despesas") {
+      const categories = Array.from(
+        new Set(data.expenses.map((e) => e.category)),
+      ).slice(0, 5);
+      return [
+        { id: "ALL", label: "Todas" },
+        { id: "type:fixed", label: "Fixas" },
+        { id: "type:variable", label: "Variáveis" },
+        ...categories.map((c) => ({ id: `cat:${c}`, label: c })),
+      ];
+    }
+    return [];
+  }, [section, data.sales, data.expenses]);
 
   const query = search.trim().toLocaleLowerCase("pt-BR");
 
@@ -954,26 +1267,37 @@ function Records({
       );
     }
     if (section === "Vendas") {
-      return data.sales.filter((x) =>
-        match([
+      return data.sales.filter((x) => {
+        if (chipFilter.startsWith("ch:") && x.channel !== chipFilter.slice(3))
+          return false;
+        if (
+          chipFilter.startsWith("pm:") &&
+          x.paymentMethod !== chipFilter.slice(3)
+        )
+          return false;
+        return match([
           x.productName,
           x.channel,
           x.paymentMethod,
           datePt(x.date),
           brl(x.total),
-        ]),
-      );
+        ]);
+      });
     }
-    return data.expenses.filter((x) =>
-      match([
+    return data.expenses.filter((x) => {
+      if (chipFilter === "type:fixed" && !x.isFixed) return false;
+      if (chipFilter === "type:variable" && x.isFixed) return false;
+      if (chipFilter.startsWith("cat:") && x.category !== chipFilter.slice(4))
+        return false;
+      return match([
         x.description,
         x.category,
         datePt(x.date),
         x.isFixed ? "Fixa" : "Variável",
         brl(x.amount),
-      ]),
-    );
-  }, [section, data, query, ingredientNames]);
+      ]);
+    });
+  }, [section, data, query, chipFilter, ingredientNames]);
 
   async function remove(id: string) {
     if (pending !== id) {
@@ -1002,6 +1326,70 @@ function Records({
     }
   }
 
+  function handleExportCsv() {
+    const suffix = `${period.from}_${period.to}`;
+    if (section === "Insumos") {
+      exportCsv(
+        `netuno-insumos-${today()}.csv`,
+        ["Insumo", "Unidade", "Qtd Compra", "Valor Compra", "Custo Unitario"],
+        (rows as Ingredient[]).map((x) => [
+          x.name,
+          x.unit,
+          num(x.purchaseQuantity),
+          x.purchasePrice.toFixed(2).replace(".", ","),
+          (x.purchasePrice / x.purchaseQuantity).toFixed(4).replace(".", ","),
+        ]),
+      );
+    } else if (section === "Produtos") {
+      exportCsv(
+        `netuno-produtos-${today()}.csv`,
+        ["Produto", "Tamanho", "Preco", "CMV", "Taxas", "Contribuicao"],
+        (rows as Product[]).map((x) => [
+          x.name,
+          x.size,
+          x.price.toFixed(2).replace(".", ","),
+          x.unitCost.toFixed(2).replace(".", ","),
+          x.variableFee.toFixed(2).replace(".", ","),
+          x.contribution.toFixed(2).replace(".", ","),
+        ]),
+      );
+    } else if (section === "Vendas") {
+      exportCsv(
+        `netuno-vendas-${suffix}.csv`,
+        [
+          "Data",
+          "Produto",
+          "Canal",
+          "Pagamento",
+          "Quantidade",
+          "Total",
+          "Contribuicao",
+        ],
+        (rows as Sale[]).map((x) => [
+          datePt(x.date),
+          x.productName,
+          x.channel,
+          x.paymentMethod,
+          num(x.quantity),
+          x.total.toFixed(2).replace(".", ","),
+          x.contribution.toFixed(2).replace(".", ","),
+        ]),
+      );
+    } else {
+      exportCsv(
+        `netuno-despesas-${suffix}.csv`,
+        ["Data", "Descricao", "Categoria", "Tipo", "Valor"],
+        (rows as Expense[]).map((x) => [
+          datePt(x.date),
+          x.description,
+          x.category,
+          x.isFixed ? "Fixa" : "Variavel",
+          x.amount.toFixed(2).replace(".", ","),
+        ]),
+      );
+    }
+  }
+
   const labelOf = (item: Ingredient | Product | Sale | Expense) =>
     "name" in item
       ? item.name
@@ -1012,8 +1400,10 @@ function Records({
   const actions = (
     item: Ingredient | Product | Sale | Expense,
     canEdit: boolean,
+    extraButtons?: ReactNode,
   ) => (
     <div className="row-actions">
+      {extraButtons}
       {canEdit && (
         <button
           className="icon-button"
@@ -1073,204 +1463,335 @@ function Records({
   }, [section, rows]);
 
   return (
-    <section className="panel listing-panel">
-      <div className="panel-heading">
-        <div>
-          <h2>
-            {section === "Produtos"
-              ? "Catálogo de produtos"
-              : section === "Insumos"
-                ? "Seus insumos"
-                : section === "Vendas"
-                  ? "Histórico de vendas"
-                  : "Despesas do período"}
-          </h2>
-          <p>
-            {rows.length} registro{rows.length === 1 ? "" : "s"}
-            {section === "Vendas" || section === "Despesas"
-              ? " no período"
-              : " no catálogo"}
+    <>
+      {section === "Vendas" && data.products.length > 0 && (
+        <div className="quick-sale-strip">
+          <span className="quick-sale-label">
+            <Zap size={14} /> Venda rápida
+          </span>
+          <div className="quick-sale-buttons">
+            {data.products.slice(0, 4).map((p) => (
+              <button
+                type="button"
+                key={p.id}
+                className="quick-sale-chip"
+                onClick={() => create(p.id)}
+              >
+                <Plus size={13} />
+                <span>
+                  {p.name} · {p.size}
+                </span>
+                <b>{brl(p.price)}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {section === "Despesas" && extras.recurringExpenses.length > 0 && (
+        <section className="panel recurring-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">LANÇAMENTO EM 1 CLIQUE</span>
+              <h2>Despesas recorrentes</h2>
+            </div>
+            <Repeat size={18} />
+          </div>
+          <div className="recurring-grid">
+            {extras.recurringExpenses.map((tpl) => (
+              <div className="recurring-card" key={tpl.id}>
+                <div>
+                  <strong>{tpl.description}</strong>
+                  <small>
+                    {tpl.category} · {brl(tpl.amount)}
+                  </small>
+                </div>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="secondary-button recurring-launch"
+                    onClick={() => void launchRecurring(tpl)}
+                  >
+                    Lançar hoje
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remover modelo ${tpl.description}`}
+                    onClick={() => removeRecurring(tpl.id)}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      <section className="panel listing-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>
+              {section === "Produtos"
+                ? "Catálogo de produtos"
+                : section === "Insumos"
+                  ? "Seus insumos"
+                  : section === "Vendas"
+                    ? "Histórico de vendas"
+                    : "Despesas do período"}
+            </h2>
+            <p>
+              {rows.length} registro{rows.length === 1 ? "" : "s"}
+              {section === "Vendas" || section === "Despesas"
+                ? " no período"
+                : " no catálogo"}
+            </p>
+          </div>
+          <div className="listing-tools">
+            {rows.length > 0 && (
+              <button
+                type="button"
+                className="secondary-button csv-button"
+                onClick={handleExportCsv}
+              >
+                <FileSpreadsheet size={15} />
+                <span>CSV</span>
+              </button>
+            )}
+            <label className="search">
+              <Search size={17} />
+              <input
+                aria-label={`Buscar em ${section}`}
+                placeholder="Buscar…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        {filterChips.length > 1 && (
+          <div className="filter-chips" role="group" aria-label="Filtros rápidos">
+            {filterChips.map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                className={`chip ${chipFilter === chip.id ? "active" : ""}`}
+                onClick={() => setChipFilter(chip.id)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {salesTotals && rows.length > 0 && (
+          <div className="summary-strip">
+            <div>
+              <small>Garrafas</small>
+              <strong>{num(salesTotals.qty)}</strong>
+            </div>
+            <div>
+              <small>Faturamento</small>
+              <strong>{brl(salesTotals.total)}</strong>
+            </div>
+            <div>
+              <small>Contribuição</small>
+              <strong>{brl(salesTotals.contrib)}</strong>
+            </div>
+          </div>
+        )}
+        {expenseTotals && rows.length > 0 && (
+          <div className="summary-strip">
+            <div>
+              <small>Total no período</small>
+              <strong>{brl(expenseTotals.total)}</strong>
+            </div>
+            <div>
+              <small>Despesas fixas</small>
+              <strong>{brl(expenseTotals.fixed)}</strong>
+            </div>
+            <div>
+              <small>Despesas variáveis</small>
+              <strong>{brl(expenseTotals.variable)}</strong>
+            </div>
+          </div>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
           </p>
-        </div>
-        <label className="search">
-          <Search size={17} />
-          <input
-            aria-label={`Buscar em ${section}`}
-            placeholder="Buscar…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+        )}
+        {!rows.length ? (
+          <Empty
+            icon={<Search />}
+            title={
+              search || chipFilter !== "ALL"
+                ? "Nenhum resultado para este filtro"
+                : "Tudo começa com o primeiro registro"
+            }
+            text={
+              search || chipFilter !== "ALL"
+                ? "Tente limpar a busca ou trocar o filtro selecionado."
+                : `Adicione ${section.toLowerCase()} para organizar seu negócio.`
+            }
+            action={
+              search || chipFilter !== "ALL" ? undefined : "Adicionar registro"
+            }
+            onClick={() => create()}
           />
-        </label>
-      </div>
-      {salesTotals && rows.length > 0 && (
-        <div className="summary-strip">
-          <div>
-            <small>Garrafas</small>
-            <strong>{num(salesTotals.qty)}</strong>
-          </div>
-          <div>
-            <small>Faturamento</small>
-            <strong>{brl(salesTotals.total)}</strong>
-          </div>
-          <div>
-            <small>Contribuição</small>
-            <strong>{brl(salesTotals.contrib)}</strong>
-          </div>
-        </div>
-      )}
-      {expenseTotals && rows.length > 0 && (
-        <div className="summary-strip">
-          <div>
-            <small>Total no período</small>
-            <strong>{brl(expenseTotals.total)}</strong>
-          </div>
-          <div>
-            <small>Despesas fixas</small>
-            <strong>{brl(expenseTotals.fixed)}</strong>
-          </div>
-          <div>
-            <small>Despesas variáveis</small>
-            <strong>{brl(expenseTotals.variable)}</strong>
-          </div>
-        </div>
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      {!rows.length ? (
-        <Empty
-          icon={<Search />}
-          title={
-            search
-              ? "Nenhum resultado para esta busca"
-              : "Tudo começa com o primeiro registro"
-          }
-          text={
-            search
-              ? "Tente buscar por outro nome ou valor."
-              : `Adicione ${section.toLowerCase()} para organizar seu negócio.`
-          }
-          action={search ? undefined : "Adicionar registro"}
-          onClick={create}
-        />
-      ) : (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                {(section === "Insumos"
-                  ? [
-                      "Insumo",
-                      "Compra",
-                      "Valor da compra",
-                      "Custo unitário",
-                      "Ações",
-                    ]
-                  : section === "Produtos"
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  {(section === "Insumos"
                     ? [
-                        "Produto",
-                        "CMV / garrafa",
-                        "Preço",
-                        "Contribuição",
+                        "Insumo",
+                        "Compra",
+                        "Custo unitário",
+                        "Estoque",
                         "Ações",
                       ]
-                    : section === "Vendas"
+                    : section === "Produtos"
                       ? [
                           "Produto",
-                          "Data",
-                          "Canal / pagamento",
-                          "Qtd.",
-                          "Total",
+                          "CMV / garrafa",
+                          "Preço",
                           "Contribuição",
                           "Ações",
                         ]
-                      : ["Descrição", "Categoria", "Data", "Valor", "Ações"]
-                ).map((x) => (
-                  <th key={x}>{x}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {section === "Insumos"
-                ? (rows as Ingredient[]).map((x) => (
-                    <tr key={x.id}>
-                      <td>
-                        <strong>{x.name}</strong>
-                        <small>Unidade base: {x.unit}</small>
-                      </td>
-                      <td>
-                        {num(x.purchaseQuantity)} {x.unit}
-                      </td>
-                      <td>{brl(x.purchasePrice)}</td>
-                      <td>
-                        {brlUnit(x.purchasePrice / x.purchaseQuantity)} /{" "}
-                        {x.unit}
-                      </td>
-                      <td>{actions(x, true)}</td>
-                    </tr>
-                  ))
-                : section === "Produtos"
-                  ? (rows as Product[]).map((x) => {
-                      const margin =
-                        x.price > 0 ? (x.contribution / x.price) * 100 : 0;
+                      : section === "Vendas"
+                        ? [
+                            "Produto",
+                            "Data",
+                            "Canal / pagamento",
+                            "Qtd.",
+                            "Total",
+                            "Contribuição",
+                            "Ações",
+                          ]
+                        : ["Descrição", "Categoria", "Data", "Valor", "Ações"]
+                  ).map((x) => (
+                    <th key={x}>{x}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {section === "Insumos"
+                  ? (rows as Ingredient[]).map((x) => {
+                      const stock = extras.stock[x.id];
+                      const low = stock && stock.currentStock <= stock.minStock;
                       return (
                         <tr key={x.id}>
                           <td>
                             <strong>{x.name}</strong>
                             <small>
-                              {x.size} · {x.recipe.length}{" "}
-                              {x.recipe.length === 1 ? "insumo" : "insumos"}
+                              {brl(x.purchasePrice)} · Unidade base: {x.unit}
                             </small>
                           </td>
-                          <td>{brl(x.unitCost)}</td>
-                          <td>{brl(x.price)}</td>
                           <td>
-                            <span
-                              className={`badge ${x.contribution <= 0 ? "bad" : ""}`}
-                            >
-                              {brl(x.contribution)} · {pct(margin)}
-                            </span>
+                            {num(x.purchaseQuantity)} {x.unit}
+                          </td>
+                          <td>
+                            {brlUnit(x.purchasePrice / x.purchaseQuantity)} /{" "}
+                            {x.unit}
+                          </td>
+                          <td>
+                            {stock ? (
+                              <button
+                                type="button"
+                                className={`badge stock-pill ${low ? "bad" : ""}`}
+                                onClick={() => openStock(x)}
+                              >
+                                {num(stock.currentStock)} {x.unit}
+                                {low ? " · Baixo" : ""}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() => openStock(x)}
+                              >
+                                <Package size={14} /> Controlar
+                              </button>
+                            )}
                           </td>
                           <td>{actions(x, true)}</td>
                         </tr>
                       );
                     })
-                  : section === "Vendas"
-                    ? (rows as Sale[]).map((x) => (
-                        <tr key={x.id}>
-                          <td>
-                            <strong>{x.productName}</strong>
-                          </td>
-                          <td>{datePt(x.date)}</td>
-                          <td>
-                            {x.channel}
-                            <small>{x.paymentMethod}</small>
-                          </td>
-                          <td>{num(x.quantity)}</td>
-                          <td className="amount">{brl(x.total)}</td>
-                          <td>{brl(x.contribution)}</td>
-                          <td>{actions(x, false)}</td>
-                        </tr>
-                      ))
-                    : (rows as Expense[]).map((x) => (
-                        <tr key={x.id}>
-                          <td>
-                            <strong>{x.description}</strong>
-                            <small>{x.isFixed ? "Fixa" : "Variável"}</small>
-                          </td>
-                          <td>{x.category}</td>
-                          <td>{datePt(x.date)}</td>
-                          <td className="amount">{brl(x.amount)}</td>
-                          <td>{actions(x, true)}</td>
-                        </tr>
-                      ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+                  : section === "Produtos"
+                    ? (rows as Product[]).map((x) => {
+                        const margin =
+                          x.price > 0 ? (x.contribution / x.price) * 100 : 0;
+                        return (
+                          <tr key={x.id}>
+                            <td>
+                              <strong>{x.name}</strong>
+                              <small>
+                                {x.size} · {x.recipe.length}{" "}
+                                {x.recipe.length === 1 ? "insumo" : "insumos"}
+                              </small>
+                            </td>
+                            <td>{brl(x.unitCost)}</td>
+                            <td>{brl(x.price)}</td>
+                            <td>
+                              <span
+                                className={`badge ${x.contribution <= 0 ? "bad" : ""}`}
+                              >
+                                {brl(x.contribution)} · {pct(margin)}
+                              </span>
+                            </td>
+                            <td>
+                              {actions(
+                                x,
+                                true,
+                                <button
+                                  className="icon-button"
+                                  aria-label={`Duplicar ${x.name}`}
+                                  title="Duplicar produto"
+                                  onClick={() => duplicateProduct(x)}
+                                >
+                                  <Copy size={15} />
+                                </button>,
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    : section === "Vendas"
+                      ? (rows as Sale[]).map((x) => (
+                          <tr key={x.id}>
+                            <td>
+                              <strong>{x.productName}</strong>
+                            </td>
+                            <td>{datePt(x.date)}</td>
+                            <td>
+                              {x.channel}
+                              <small>{x.paymentMethod}</small>
+                            </td>
+                            <td>{num(x.quantity)}</td>
+                            <td className="amount">{brl(x.total)}</td>
+                            <td>{brl(x.contribution)}</td>
+                            <td>{actions(x, false)}</td>
+                          </tr>
+                        ))
+                      : (rows as Expense[]).map((x) => (
+                          <tr key={x.id}>
+                            <td>
+                              <strong>{x.description}</strong>
+                              <small>{x.isFixed ? "Fixa" : "Variável"}</small>
+                            </td>
+                            <td>{x.category}</td>
+                            <td>{datePt(x.date)}</td>
+                            <td className="amount">{brl(x.amount)}</td>
+                            <td>{actions(x, true)}</td>
+                          </tr>
+                        ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -1466,8 +1987,8 @@ function Pricing({
               </div>
             ) : (
               <p className="notice">
-                A margem desejada somada à taxa percentual ({simProduct.feePercent}
-                %) ultrapassa 100%. Reduza a margem alvo.
+                A margem desejada somada à taxa percentual (
+                {simProduct.feePercent}%) ultrapassa 100%. Reduza a margem alvo.
               </p>
             )}
           </div>

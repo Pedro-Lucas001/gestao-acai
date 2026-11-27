@@ -1,0 +1,18 @@
+{
+  "name": "Netuno Açaí · Gestão Financeira",
+  "short_name": "Netuno Açaí",
+  "description": "Gestão financeira Netuno Açaí: insumos, fichas técnicas, estoque, vendas, despesas e precificação.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#491a50",
+  "theme_color": "#491a50",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/netuno-logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}
